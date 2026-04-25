@@ -184,7 +184,7 @@ export default function Dashboard() {
       {/* Top stats strip */}
       <div className="grid grid-cols-4 gap-px bg-zinc-800 border-b border-zinc-800 shrink-0">
         <Stat label="Frequency" value={`${g.frequency_hz.toFixed(3)} Hz`} sub={g.ts_local} valueClass={freqColor} />
-        <Stat label="Reserve Margin" value={`${g.reserve_margin_pct.toFixed(1)} %`} sub={`Cap ${(g.gen_capacity_mw/1000).toFixed(1)} GW · Trip ${g.gen_tripped_mw.toFixed(0)} MW`} valueClass={reserveColor} />
+        <Stat label="Capacity Headroom" value={`${g.reserve_margin_pct.toFixed(1)} %`} sub={`Gen cap ${(g.gen_capacity_mw/1000).toFixed(1)} GW · Trip ${g.gen_tripped_mw.toFixed(0)} MW · vs total load`} valueClass={reserveColor} />
         <Stat label="Base Demand" value={`${(g.base_demand_mw/1000).toFixed(2)} GW`} sub={`+ DC ${(g.dc_load_mw - g.committed_shed_mw).toFixed(0)} MW`} />
         <Stat label="Curtailed" value={`${g.committed_shed_mw.toFixed(0)} MW`} sub={state.mode === "gridparley" ? "GridParley active" : "—"} valueClass={g.committed_shed_mw > 0 ? "text-emerald-400" : "text-zinc-500"} />
       </div>
@@ -202,14 +202,14 @@ export default function Dashboard() {
               <div className="bg-zinc-900/95 border border-zinc-800 rounded-lg p-5 max-w-md shadow-2xl pointer-events-auto">
                 <div className="text-xs uppercase tracking-widest text-amber-400 mb-2">Scenario · Jun 20, 2024</div>
                 <div className="text-base text-zinc-100 mb-3 leading-snug">
-                  Eastern US heat dome. ISO-NE peak demand. An 800 MW AI training fleet is running. A 400 MW generator trips offline.
+                  Eastern US heat dome. ISO-NE actually peaked at <strong className="text-amber-400">23,266 MW at 19:00 ET</strong> that day (real EIA-930 data). We layer an 800 MW AI training fleet on top. Then a 400 MW generator trips offline.
                 </div>
                 <div className="text-sm text-zinc-400 mb-4 leading-snug">
-                  Watch the grid in two modes:
+                  Two modes:
                 </div>
                 <ol className="text-sm text-zinc-300 space-y-2 list-decimal list-inside">
-                  <li><strong className="text-zinc-100">Run Baseline</strong> — no coordination. Watch frequency drop, brownout flash.</li>
-                  <li><strong className="text-emerald-400">Run with GridParley</strong> — two AIs negotiate, validator catches a bad bid, grid recovers.</li>
+                  <li><strong className="text-zinc-100">Run Baseline</strong> — no coordination. Frequency drops, brownout flashes.</li>
+                  <li><strong className="text-emerald-400">Run with GridParley</strong> — two AIs negotiate, validator catches the bad bid, grid recovers.</li>
                 </ol>
               </div>
             </div>
@@ -241,17 +241,8 @@ export default function Dashboard() {
               </LineChart>
             </ResponsiveContainer>
           </div>
-          <div className="text-[11px] text-zinc-500 mt-1 leading-tight space-y-1">
-            <div>
-              <strong className="text-emerald-400">Green</strong> = generation capacity available ·
-              <strong className="text-purple-300"> purple</strong> = total load (base + AI data center, post-curtailment) ·
-              <strong className="text-blue-300"> blue dashed</strong> = New England base demand (2024 actual) ·
-              <strong className="text-amber-400"> yellow</strong> = grid frequency (left axis).
-            </div>
-            <div className="text-zinc-600">
-              <strong className="text-amber-400">Frequency is the grid&apos;s heartbeat.</strong> 60.00 Hz = healthy.
-              Below <strong className="text-amber-400">59.95</strong> the ISO must intervene; below <strong className="text-rose-400">59.50</strong> automatic load-shedding kicks in (lights go out in neighborhoods). Healthy state: green above purple, yellow at 60.0.
-            </div>
+          <div className="text-[11px] text-zinc-500 mt-1 leading-tight">
+            <strong className="text-amber-400">Frequency (yellow) is the grid&apos;s heartbeat.</strong> 60.00 Hz = healthy. Below <strong className="text-amber-400">59.95</strong> the ISO must intervene. Below <strong className="text-rose-400">59.50</strong> automatic load-shedding kicks in. Capacity headroom (top stat) is a separate slow-moving safety buffer — it stays high while frequency dips, because frequency tracks <em>instantaneous</em> generation-vs-load while headroom tracks <em>maximum</em> capacity-vs-load.
           </div>
         </section>
 
