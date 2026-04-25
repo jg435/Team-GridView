@@ -91,7 +91,7 @@ export default function Dashboard() {
         <div>
           <div className="text-sm uppercase tracking-widest text-zinc-500">ISO-NE Control · Demo</div>
           <h1 className="text-2xl font-semibold tracking-tight">
-            GridParley <span className="text-zinc-500 font-normal">— Grid-Aware AI Agents</span>
+            GridParley <span className="text-zinc-500 font-normal">— Grid-Aware AI Agents · Jun 20 2024 replay</span>
           </h1>
         </div>
         <div className="flex gap-2 items-center">
@@ -112,6 +112,16 @@ export default function Dashboard() {
           </button>
         </div>
       </header>
+
+      {/* Brownout alert banner */}
+      {g.blackout_severity > 0.3 && state.mode !== "idle" && (
+        <div className={`shrink-0 px-6 py-2 text-center font-mono text-sm border-b border-rose-700 ${
+          g.blackout_severity > 0.7 ? "bg-rose-700 text-white animate-pulse" : "bg-rose-900/60 text-rose-100"
+        }`}>
+          ⚠ BROWNOUT WARNING · Metro Boston residential zone · severity {(g.blackout_severity*100).toFixed(0)}%
+          {state.mode === "baseline" && " · NO COORDINATION · curtailment unmet"}
+        </div>
+      )}
 
       {/* Top stats strip */}
       <div className="grid grid-cols-4 gap-px bg-zinc-800 border-b border-zinc-800 shrink-0">
