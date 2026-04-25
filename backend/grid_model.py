@@ -22,7 +22,7 @@ class GridState:
     base_demand_mw: float = 14000.0
     dc_load_mw: float = 800.0
     committed_shed_mw: float = 0.0
-    gen_capacity_mw: float = 24000.0
+    gen_capacity_mw: float = 26000.0   # ISO-NE installed ~32 GW; 26 GW realistic available after derates/outages
     gen_tripped_mw: float = 0.0
     frequency_hz: float = F_NOMINAL
     p_gen_eff_mw: float = 0.0
