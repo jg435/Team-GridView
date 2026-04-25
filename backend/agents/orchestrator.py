@@ -68,11 +68,15 @@ async def _set_thinking(rs, broadcast, actor: str | None, text: str | None):
 
 # ---------- LIVE path: OpenRouter-hosted LLM ----------
 
+LLM_CALL_TIMEOUT_SEC = 25.0
+
+
 def _make_client():
     from openai import AsyncOpenAI
     return AsyncOpenAI(
         api_key=os.environ["OPENROUTER_API_KEY"],
         base_url=OPENROUTER_BASE_URL,
+        timeout=LLM_CALL_TIMEOUT_SEC,
         default_headers={
             "HTTP-Referer": APP_REFERER,
             "X-Title": APP_TITLE,
