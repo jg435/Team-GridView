@@ -4,6 +4,7 @@ import {
   LineChart, Line, XAxis, YAxis, ReferenceLine, ReferenceArea, ResponsiveContainer, Tooltip, CartesianGrid, Legend,
 } from "recharts";
 import type { AppState, TranscriptMessage } from "@/app/lib/types";
+import NewEnglandMap from "@/app/components/NewEnglandMap";
 
 const BACKEND = "http://localhost:8000";
 const WS_URL = "ws://localhost:8000/ws";
@@ -246,8 +247,11 @@ export default function Dashboard() {
           </div>
         </section>
 
-        {/* Right column: protected loads + job manifest */}
+        {/* Right column: map + protected loads + job manifest */}
         <aside className="col-span-4 bg-zinc-950 p-4 overflow-auto min-h-0">
+          <div className="mb-4">
+            <NewEnglandMap />
+          </div>
           <div className="text-xs uppercase tracking-widest text-zinc-500 mb-2">Protected Loads</div>
           <div className="grid grid-cols-1 gap-2 mb-6">
             {state.protected_loads.map((p) => (
