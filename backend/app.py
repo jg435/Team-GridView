@@ -45,6 +45,9 @@ class RunState:
     brownout_ticks: int = 0         # ticks with blackout_severity > 0.3
     peak_severity: float = 0.0      # max blackout_severity seen
     final_committed_shed_mw: float = 0.0
+    # transient thinking indicator while an agent / validator is working:
+    thinking: str | None = None     # e.g., "ISO operator is reviewing telemetry"
+    thinking_actor: str | None = None   # "iso" | "dc" | "validator"
 
     def to_dict(self) -> dict:
         g = self.grid
@@ -81,6 +84,8 @@ class RunState:
         return {
             "mode": self.mode,
             "scenario_tick": self.scenario_tick,
+            "thinking": self.thinking,
+            "thinking_actor": self.thinking_actor,
             "result": result,
             "grid": {
                 "tick": g.tick,
@@ -117,6 +122,7 @@ class RunState:
 _run_state: RunState = RunState()
 _run_lock = asyncio.Lock()
 _subscribers: list[asyncio.Queue] = []
+_active_task: asyncio.Task | None = None
 
 
 async def broadcast(state_dict: dict) -> None:
@@ -218,15 +224,29 @@ async def get_state():
 
 @app.post("/run/{mode}")
 async def run(mode: str):
+    global _active_task
     if mode not in ("baseline", "gridparley"):
         return {"error": f"unknown mode {mode}"}
-    asyncio.create_task(run_scenario(mode))
+    # cancel any in-flight scenario before starting a new one
+    if _active_task and not _active_task.done():
+        _active_task.cancel()
+        try:
+            await _active_task
+        except (asyncio.CancelledError, Exception):
+            pass
+    _active_task = asyncio.create_task(run_scenario(mode))
     return {"started": mode}
 
 
 @app.post("/reset")
 async def reset():
-    global _run_state
+    global _run_state, _active_task
+    if _active_task and not _active_task.done():
+        _active_task.cancel()
+        try:
+            await _active_task
+        except (asyncio.CancelledError, Exception):
+            pass
     _run_state = RunState()
     await broadcast(_run_state.to_dict())
     return {"ok": True}

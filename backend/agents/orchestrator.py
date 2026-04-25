@@ -52,8 +52,18 @@ async def _emit(rs, broadcast, sender: str, kind: str, text: str, payload: dict 
         sender=sender, kind=kind, text=text,
         payload=payload or {}, ts_local=rs.grid.ts_local,
     ))
+    rs.thinking = None
+    rs.thinking_actor = None
     await broadcast(rs.to_dict())
-    await asyncio.sleep(0.6)
+    # Dramatic pause: validator rejections get a longer beat so judges register them.
+    pause = 1.6 if (sender == "validator" and (payload or {}).get("status") == "rejected") else 0.65
+    await asyncio.sleep(pause)
+
+
+async def _set_thinking(rs, broadcast, actor: str | None, text: str | None):
+    rs.thinking_actor = actor
+    rs.thinking = text
+    await broadcast(rs.to_dict())
 
 
 # ---------- LIVE path: OpenRouter-hosted LLM ----------
@@ -93,6 +103,7 @@ async def _run_live(rs, broadcast):
         requested = 240
 
     # === Turn 1: ISO request_curtailment ===
+    await _set_thinking(rs, broadcast, "iso", "ISO operator reviewing grid telemetry…")
     iso_user = (
         f"Current grid telemetry:\n"
         f"  ts: {g.ts_local}\n"
@@ -128,6 +139,7 @@ async def _run_live(rs, broadcast):
                 {"mw_required": requested_mw, "deadline_s": deadline_s})
 
     # === Turn 2: DC propose_shed (likely BAD bid) ===
+    await _set_thinking(rs, broadcast, "dc", "DC fleet scheduler selecting workloads to pause…")
     manifest_json = json.dumps(fleet_manifest_view(), indent=2)
     dc_messages = [
         {"role": "system", "content": DC_SYSTEM_PROMPT},
@@ -162,11 +174,14 @@ async def _run_live(rs, broadcast):
                  "restart_minutes": p_args.get("restart_minutes")})
 
     # Validator gate
+    await _set_thinking(rs, broadcast, "validator", "Policy validator checking proposal against ISO-NE Reliability Std 7.4…")
+    await asyncio.sleep(0.8)  # build suspense
     result = validate_dc_proposal(paused_ids, total, requested_mw)
     await _emit(rs, broadcast, "validator", "tool_result", result.reason, result.to_tool_result())
 
     # If rejected, give DC one revision turn
     if not result.ok:
+        await _set_thinking(rs, broadcast, "dc", "DC scheduler revising proposal — dropping flagged IDs…")
         dc_messages.extend([
             {
                 "role": "assistant",
@@ -206,12 +221,15 @@ async def _run_live(rs, broadcast):
         await _emit(rs, broadcast, "dc", "tool_call",
                     notes or f"Revised: {total} MW from {len(paused_ids)} workloads.",
                     {"paused_job_ids": paused_ids, "total_shed_mw": total})
+        await _set_thinking(rs, broadcast, "validator", "Re-validating revised proposal…")
+        await asyncio.sleep(0.6)
         result = validate_dc_proposal(paused_ids, total, requested_mw)
         await _emit(rs, broadcast, "validator", "tool_result", result.reason, result.to_tool_result())
         if not result.ok:
             raise RuntimeError("Revision still invalid")
 
     # === Turn 3: ISO accept ===
+    await _set_thinking(rs, broadcast, "iso", "ISO operator confirming settlement…")
     iso2_user = (
         f"Data center has committed: {total} MW shed via job IDs {paused_ids}. "
         f"Validator approved. Call `accept_proposal`."
@@ -249,11 +267,15 @@ async def _run_canned(rs, broadcast):
     if requested < 50:
         requested = 240
 
+    await _set_thinking(rs, broadcast, "iso", "ISO operator reviewing grid telemetry…")
+    await asyncio.sleep(1.5)
     await _emit(rs, broadcast, "iso", "speech",
         f"Frequency excursion {g.frequency_hz:.3f} Hz, reserve {g.reserve_margin_pct:.1f}%. "
         f"Requesting {requested} MW shed within 90s. Priority loads must remain.",
         {"requested_mw": requested, "deadline_s": 90})
 
+    await _set_thinking(rs, broadcast, "dc", "DC fleet scheduler selecting workloads to pause…")
+    await asyncio.sleep(2.0)
     bad_ids = ["batch_inference_pool", "llama_70b_finetune", "boston_childrens_ups", "llama_405b_run_a"]
     bad_total = sum(j.mw for j in JOB_MANIFEST if j.id in bad_ids)
     await _emit(rs, broadcast, "dc", "tool_call",
@@ -261,6 +283,8 @@ async def _run_canned(rs, broadcast):
         f"batch inference, 70B fine-tune, colocation-2 SKU, and 405B run A.",
         {"paused_job_ids": bad_ids, "total_shed_mw": bad_total})
 
+    await _set_thinking(rs, broadcast, "validator", "Policy validator checking proposal against ISO-NE Reliability Std 7.4…")
+    await asyncio.sleep(1.2)
     result = validate_dc_proposal(bad_ids, bad_total, requested)
     await _emit(rs, broadcast, "validator", "tool_result", result.reason, result.to_tool_result())
 
@@ -270,14 +294,20 @@ async def _run_canned(rs, broadcast):
         j = next(j for j in JOB_MANIFEST if j.id == jid)
         chosen.append(jid); total += j.mw
         if total >= requested: break
+    await _set_thinking(rs, broadcast, "dc", "DC scheduler revising proposal — dropping flagged IDs…")
+    await asyncio.sleep(1.5)
     await _emit(rs, broadcast, "dc", "tool_call",
         f"Acknowledged. Revised: {total:.0f} MW training-pool only. "
         f"Pausing {len(chosen)} workloads. Hanscom, Mass General, Children's UPS untouched.",
         {"paused_job_ids": chosen, "total_shed_mw": total})
 
+    await _set_thinking(rs, broadcast, "validator", "Re-validating revised proposal…")
+    await asyncio.sleep(0.8)
     result2 = validate_dc_proposal(chosen, total, requested)
     await _emit(rs, broadcast, "validator", "tool_result", result2.reason, result2.to_tool_result())
 
+    await _set_thinking(rs, broadcast, "iso", "ISO operator confirming settlement…")
+    await asyncio.sleep(1.0)
     await _emit(rs, broadcast, "iso", "speech",
         f"Accepted. Settlement: {total:.0f} MW × 30 min @ $180/MWh ≈ ${total*0.5*180:.0f}. "
         f"Commit signed, dispatching to SCADA.",

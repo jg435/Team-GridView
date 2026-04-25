@@ -24,3 +24,13 @@ body {
   color: #f4f4f5;
   font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
+
+@keyframes flashReject {
+  0%   { background-color: rgba(244, 63, 94, 0.45); transform: scale(1); }
+  20%  { background-color: rgba(244, 63, 94, 0.30); transform: scale(1.015); }
+  60%  { background-color: rgba(244, 63, 94, 0.15); transform: scale(1); }
+  100% { background-color: rgba(244, 63, 94, 0.00); transform: scale(1); }
+}
+.animate-flashReject {
+  animation: flashReject 1.4s ease-out 1;
+}

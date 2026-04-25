@@ -25,7 +25,7 @@ const initialResult = {
 const initialState: AppState = {
   mode: "idle", scenario_tick: 0, grid: initialGrid,
   transcript: [], finished: false, protected_loads: [], job_manifest: [],
-  result: initialResult,
+  result: initialResult, thinking: null, thinking_actor: null,
 };
 
 interface ChartPoint {
@@ -42,37 +42,70 @@ export default function Dashboard() {
   const [series, setSeries] = useState<ChartPoint[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const lastTickRef = useRef<number>(-1);
+  const [wsStatus, setWsStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
+  const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const transcriptEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const ws = new WebSocket(WS_URL);
-    wsRef.current = ws;
-    ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data);
-        if (msg.type === "state") {
-          const s: AppState = msg.data;
-          setState(s);
-          // Append a chart point only when scenario_tick advances
-          if (s.scenario_tick !== lastTickRef.current && s.mode !== "idle") {
-            lastTickRef.current = s.scenario_tick;
-            setSeries((prev) => [
-              ...prev,
-              {
-                tick: s.scenario_tick,
-                ts: s.grid.ts_local,
-                freq: s.grid.frequency_hz,
-                demand: s.grid.base_demand_mw,
-                total: s.grid.total_load_mw,
-                genAvailable: s.grid.gen_available_mw,
-              },
-            ]);
+    let cancelled = false;
+    const connect = () => {
+      if (cancelled) return;
+      const ws = new WebSocket(WS_URL);
+      wsRef.current = ws;
+      setWsStatus("connecting");
+      ws.onopen = () => { setWsStatus("connected"); };
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === "state") {
+            const s: AppState = msg.data;
+            setState(s);
+            // reset chart series on a fresh run (mode flips from idle, or tick rewinds)
+            if (s.mode !== "idle" && s.scenario_tick === 0 && lastTickRef.current !== -1) {
+              setSeries([]);
+              lastTickRef.current = -1;
+            }
+            // append chart point only when scenario_tick advances
+            if (s.scenario_tick !== lastTickRef.current && s.mode !== "idle") {
+              lastTickRef.current = s.scenario_tick;
+              setSeries((prev) => [
+                ...prev,
+                {
+                  tick: s.scenario_tick,
+                  ts: s.grid.ts_local,
+                  freq: s.grid.frequency_hz,
+                  demand: s.grid.base_demand_mw,
+                  total: s.grid.total_load_mw,
+                  genAvailable: s.grid.gen_available_mw,
+                },
+              ]);
+            }
           }
+        } catch {}
+      };
+      ws.onclose = () => {
+        wsRef.current = null;
+        setWsStatus("disconnected");
+        if (!cancelled) {
+          reconnectRef.current = setTimeout(connect, 1000);
         }
-      } catch {}
+      };
+      ws.onerror = () => {
+        ws.close();
+      };
     };
-    ws.onclose = () => { wsRef.current = null; };
-    return () => { ws.close(); };
+    connect();
+    return () => {
+      cancelled = true;
+      if (reconnectRef.current) clearTimeout(reconnectRef.current);
+      if (wsRef.current) wsRef.current.close();
+    };
   }, []);
+
+  // Auto-scroll transcript to latest message
+  useEffect(() => {
+    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [state.transcript.length, state.thinking]);
 
   const trigger = async (path: "run/baseline" | "run/gridparley" | "reset") => {
     if (path === "reset") {
@@ -104,6 +137,7 @@ export default function Dashboard() {
           </h1>
         </div>
         <div className="flex gap-2 items-center">
+          <WsBadge status={wsStatus} />
           <ModeBadge mode={state.mode} finished={state.finished} />
           <button onClick={() => trigger("run/baseline")}
             disabled={state.mode !== "idle" && !state.finished}
@@ -238,10 +272,14 @@ export default function Dashboard() {
           Negotiation Transcript {state.transcript.length > 0 && <span className="text-zinc-600 normal-case">· {state.transcript.length} messages</span>}
         </div>
         <div className="px-6 py-3 space-y-2">
-          {state.transcript.length === 0 && (
+          {state.transcript.length === 0 && !state.thinking && (
             <div className="text-sm text-zinc-600">No traffic. Trigger a run to see the ISO ↔ DC ↔ Validator negotiation.</div>
           )}
           {state.transcript.map((m, i) => <TranscriptRow key={i} m={m} />)}
+          {state.thinking && state.thinking_actor && (
+            <ThinkingBubble actor={state.thinking_actor} text={state.thinking} />
+          )}
+          <div ref={transcriptEndRef} />
         </div>
       </section>
     </div>
@@ -321,6 +359,23 @@ function ChartLegend() {
   );
 }
 
+function WsBadge({ status }: { status: "connecting" | "connected" | "disconnected" }) {
+  if (status === "connected") {
+    return (
+      <span className="text-[10px] uppercase tracking-widest px-2 py-1 rounded bg-emerald-950/40 text-emerald-400 border border-emerald-900/40 flex items-center gap-1.5">
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+        live
+      </span>
+    );
+  }
+  return (
+    <span className="text-[10px] uppercase tracking-widest px-2 py-1 rounded bg-amber-950/40 text-amber-400 border border-amber-900/40 flex items-center gap-1.5">
+      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+      {status}
+    </span>
+  );
+}
+
 function ModeBadge({ mode, finished }: { mode: AppState["mode"]; finished: boolean }) {
   const label =
     mode === "idle" ? "IDLE"
@@ -353,19 +408,50 @@ function TranscriptRow({ m }: { m: TranscriptMessage }) {
   const s = senderStyles[m.sender] || senderStyles.system;
   const isReject = m.kind === "tool_result" && (m.payload as { status?: string })?.status === "rejected";
   return (
-    <div className={`flex gap-3 rounded-md border ${s.bg} px-3 py-2`}>
+    <div className={`flex gap-3 rounded-md border ${s.bg} px-3 py-2 ${isReject ? "ring-2 ring-rose-500/60 shadow-lg shadow-rose-500/20 animate-flashReject" : ""}`}>
       <div className={`w-1 rounded-sm ${isReject ? "bg-rose-500" : s.bar}`} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between text-xs mb-1">
           <span className={`font-mono uppercase tracking-widest ${s.text}`}>
             {s.label}
             <span className="ml-2 text-zinc-600 normal-case">{m.kind}</span>
-            {isReject && <span className="ml-2 px-1.5 py-0.5 rounded bg-rose-600 text-white text-[10px]">REJECTED</span>}
+            {isReject && <span className="ml-2 px-1.5 py-0.5 rounded bg-rose-600 text-white text-[10px] font-bold animate-pulse">⚠ REJECTED</span>}
           </span>
           <span className="text-zinc-600">{m.ts_local}</span>
         </div>
-        <div className="text-sm text-zinc-200 leading-snug">{m.text}</div>
+        <div className={`text-sm leading-snug ${isReject ? "text-rose-100 font-medium" : "text-zinc-200"}`}>{m.text}</div>
       </div>
     </div>
+  );
+}
+
+function ThinkingBubble({ actor, text }: { actor: "iso" | "dc" | "validator"; text: string }) {
+  const styles: Record<string, { label: string; bar: string; text: string; bg: string }> = {
+    iso:       { label: "ISO-NE",   bar: "bg-blue-500/60",   text: "text-blue-300/80",   bg: "bg-blue-950/10 border-blue-900/30 border-dashed" },
+    dc:        { label: "DC FLEET", bar: "bg-purple-500/60", text: "text-purple-300/80", bg: "bg-purple-950/10 border-purple-900/30 border-dashed" },
+    validator: { label: "POLICY",   bar: "bg-rose-500/60",   text: "text-rose-300/80",   bg: "bg-rose-950/10 border-rose-900/30 border-dashed" },
+  };
+  const s = styles[actor];
+  return (
+    <div className={`flex gap-3 rounded-md border ${s.bg} px-3 py-2 italic`}>
+      <div className={`w-1 rounded-sm ${s.bar}`} />
+      <div className="flex-1">
+        <div className="flex items-center text-xs mb-1">
+          <span className={`font-mono uppercase tracking-widest ${s.text}`}>{s.label}</span>
+          <Dots />
+        </div>
+        <div className="text-sm text-zinc-400 leading-snug">{text}</div>
+      </div>
+    </div>
+  );
+}
+
+function Dots() {
+  return (
+    <span className="ml-2 inline-flex gap-1">
+      <span className="w-1 h-1 rounded-full bg-zinc-500 animate-bounce" style={{ animationDelay: "0ms" }} />
+      <span className="w-1 h-1 rounded-full bg-zinc-500 animate-bounce" style={{ animationDelay: "150ms" }} />
+      <span className="w-1 h-1 rounded-full bg-zinc-500 animate-bounce" style={{ animationDelay: "300ms" }} />
+    </span>
   );
 }

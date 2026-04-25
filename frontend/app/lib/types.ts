@@ -64,4 +64,6 @@ export interface AppState {
   protected_loads: ProtectedLoad[];
   job_manifest: JobManifestItem[];
   result: RunResult;
+  thinking: string | null;
+  thinking_actor: "iso" | "dc" | "validator" | null;
 }
