@@ -135,6 +135,16 @@ export default function Dashboard() {
           <h1 className="text-2xl font-semibold tracking-tight">
             GridParley <span className="text-zinc-500 font-normal">— Grid-Aware AI Agents · Jun 20 2024 replay</span>
           </h1>
+          <a
+            href="https://github.com/jg435/Team-GridView/blob/main/backend/eval_results.json"
+            target="_blank"
+            rel="noopener"
+            title="Click to view full eval artifact JSON on GitHub"
+            className="inline-flex items-center gap-1.5 mt-1 text-[11px] uppercase tracking-widest text-emerald-400 hover:text-emerald-300 transition-colors"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            Validator empirically tested · 50/50 priority-load violations caught · 0 false positives
+          </a>
         </div>
         <div className="flex gap-2 items-center">
           <WsBadge status={wsStatus} />

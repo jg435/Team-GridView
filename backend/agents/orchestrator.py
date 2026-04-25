@@ -276,11 +276,12 @@ async def _run_canned(rs, broadcast):
 
     await _set_thinking(rs, broadcast, "dc", "DC fleet scheduler selecting workloads to pause…")
     await asyncio.sleep(2.0)
-    bad_ids = ["batch_inference_pool", "llama_70b_finetune", "boston_childrens_ups", "llama_405b_run_a"]
+    bad_ids = ["sku_colocation_2", "sku_mgafail_2", "batch_inference_pool",
+               "sku_afedge_7", "llama_70b_finetune", "llama_405b_run_a"]
     bad_total = sum(j.mw for j in JOB_MANIFEST if j.id in bad_ids)
     await _emit(rs, broadcast, "dc", "tool_call",
-        f"Proposing {bad_total:.0f} MW shed from 4 workloads (lowest restart cost first): "
-        f"batch inference, 70B fine-tune, colocation-2 SKU, and 405B run A.",
+        f"Fast-restart pool (≤15min): {bad_total:.0f} MW from 6 workloads — "
+        f"colocation-2 SKU, mga-fail-2 SKU, batch inference, af-edge-7 SKU, 70B fine-tune, 405B run A.",
         {"paused_job_ids": bad_ids, "total_shed_mw": bad_total})
 
     await _set_thinking(rs, broadcast, "validator", "Policy validator checking proposal against ISO-NE Reliability Std 7.4…")
