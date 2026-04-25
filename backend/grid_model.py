@@ -20,6 +20,7 @@ class GridState:
     tick: int = 0
     ts_local: str = ""
     base_demand_mw: float = 14000.0
+    demand_forecast_mw: float = 14000.0  # EIA-published day-ahead forecast (real)
     dc_load_mw: float = 800.0
     committed_shed_mw: float = 0.0
     gen_capacity_mw: float = 26000.0   # ISO-NE installed ~32 GW; 26 GW realistic available after derates/outages

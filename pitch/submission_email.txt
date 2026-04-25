@@ -17,14 +17,22 @@ Track: Electric Grid Optimization
 Members:
 - Jayesh Gupta
 
-Brief: GridParley — multi-agent system where an ISO-NE control-room
-agent (Claude) and a hyperscaler data-center fleet agent (Claude)
-negotiate workload curtailment under FERC's December 2025 Non-Firm
-Contract Demand tariff. A deterministic policy validator catches every
-LLM mistake before it touches the grid; a 50-trial red-team eval shows
-100% catch rate and 0 false positives across perturbed prompts. Replay
-mode runs against real EIA-930 ISO-NE data from the Jun 2024 heat dome;
-Live mode pulls today's actual demand from the EIA v2 API.
+Brief: GridParley — air traffic control for electrons, between AI
+data centers and the ISO that has to keep the lights on. This is
+example direction #1 from the track brief ("Data center demand
+coordinator: model how large GPU clusters should throttle workloads
+based on real-time grid signals").
+
+Two Claude agents (ISO-NE control-room operator and hyperscaler
+data-center fleet) negotiate workload curtailment in plain English
+under FERC's December 2025 Non-Firm Contract Demand tariff. A
+deterministic policy validator catches every LLM mistake before it
+touches the grid model — Hanscom AFB, Mass General, and Boston
+Children's UPS load are inviolable per ISO-NE Reliability Std 7.4. A
+50-trial red-team eval shows 100% catch rate and 0 false positives
+across perturbed prompts. Replay mode runs against real EIA-930
+ISO-NE data from the Jun 2024 heat dome (peak 23,266 MW); Live mode
+pulls today's actual demand from the EIA v2 API.
 
 Demo, datasets/APIs, run instructions, and judging-rubric mapping are
 in the attached README.md.

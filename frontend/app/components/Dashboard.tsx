@@ -36,6 +36,7 @@ interface ChartPoint {
   demand: number;       // base demand (residential + industrial)
   total: number;        // base + DC load (after curtailment)
   genAvailable: number; // gen capacity minus tripped
+  forecast: number;     // EIA day-ahead demand forecast (real, from EIA-930)
 }
 
 export default function Dashboard() {
@@ -80,6 +81,7 @@ export default function Dashboard() {
                   demand: s.grid.base_demand_mw,
                   total: s.grid.total_load_mw,
                   genAvailable: s.grid.gen_available_mw,
+                  forecast: s.grid.demand_forecast_mw ?? s.grid.base_demand_mw,
                 },
               ]);
             }
@@ -252,6 +254,7 @@ export default function Dashboard() {
                 <Line yAxisId="mw" type="stepAfter" dataKey="genAvailable" stroke="#10b981" strokeWidth={2} dot={false} isAnimationActive={false} name="Gen available" />
                 <Line yAxisId="mw" type="monotone" dataKey="total" stroke="#a78bfa" strokeWidth={2} dot={false} isAnimationActive={false} name="Total load (incl DC)" />
                 <Line yAxisId="mw" type="monotone" dataKey="demand" stroke="#60a5fa" strokeWidth={1.5} strokeDasharray="3 3" dot={false} isAnimationActive={false} name="Base demand" />
+                <Line yAxisId="mw" type="monotone" dataKey="forecast" stroke="#94a3b8" strokeWidth={1} strokeDasharray="2 4" dot={false} isAnimationActive={false} name="EIA forecast" />
                 <Line yAxisId="freq" type="monotone" dataKey="freq" stroke="#fbbf24" strokeWidth={2.5} dot={false} isAnimationActive={false} name="Frequency" />
               </LineChart>
             </ResponsiveContainer>
@@ -379,7 +382,8 @@ function ChartLegend() {
   const items = [
     { color: "#10b981", label: "Gen available", shape: "line" },
     { color: "#a78bfa", label: "Total load", shape: "line" },
-    { color: "#60a5fa", label: "Base demand", shape: "dashed" },
+    { color: "#60a5fa", label: "Actual demand", shape: "dashed" },
+    { color: "#94a3b8", label: "EIA forecast", shape: "dashed" },
     { color: "#fbbf24", label: "Frequency", shape: "line" },
   ];
   return (

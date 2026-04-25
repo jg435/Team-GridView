@@ -28,6 +28,7 @@ export interface GridSnapshot {
   ts_local: string;
   frequency_hz: number;
   base_demand_mw: number;
+  demand_forecast_mw: number;   // EIA-published day-ahead forecast (real number from the dataset)
   dc_load_mw: number;
   committed_shed_mw: number;
   total_load_mw: number;

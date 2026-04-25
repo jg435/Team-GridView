@@ -1,6 +1,12 @@
 # GridParley
 
-> Grid-aware AI agents that negotiate workload curtailment between ISO-NE and a hyperscaler data-center fleet — under FERC's new Non-Firm Contract Demand framework, with deterministic safety rails that protect DoD priority loads and hospitals.
+> *Air traffic control, but for electrons — between AI data centers and the ISO that has to keep the lights on.*
+
+Grid-aware AI agents that negotiate workload curtailment between ISO-NE and a hyperscaler data-center fleet — under FERC's new Non-Firm Contract Demand framework, with deterministic safety rails that protect DoD priority loads and hospitals.
+
+The track brief said: *"You don't have to solve the whole grid — find one lever worth pulling and pull it hard."* We did. The lever is **the FERC Dec 2025 PJM order** that creates a Non-Firm Contract Demand tariff for AI co-located loads. It's a policy primitive with no operating layer. **We built the operating layer.**
+
+This project is example direction #1 in the track brief: *"Data center demand coordinator: model how large GPU clusters should throttle workloads based on real-time grid signals."*
 
 | | |
 |---|---|
@@ -54,12 +60,16 @@ The safety layer isn't a one-shot stunt against a single planted trap. It catche
 
 ## Datasets and APIs
 
+We pulled from the track brief's suggested-source list:
+
 | Source | Use | License |
 |---|---|---|
-| [EIA Form-930 Hourly Electric Grid Monitor](https://www.eia.gov/electricity/gridmonitor/) | Real ISO-NE hourly demand for the Jun 14–20 2024 heat-dome week (peak day Jun 20 at **23,266 MW**, 19:00 ET). Filtered to `backend/data/isone_jun2024.csv`. | Public domain (US Government) |
-| [EIA v2 API](https://www.eia.gov/opendata/) (`electricity/rto/region-data`, `respondent=ISNE`) | Optional **Live data mode**: pulls today's actual ISO-NE demand. Toggled in the dashboard header. Requires free API key. | Public domain |
+| [EIA Form-930 Hourly Electric Grid Monitor](https://www.eia.gov/electricity/gridmonitor/) | Real ISO-NE hourly demand **and ISO-published day-ahead forecast** for the Jun 14–20 2024 heat-dome week (peak day Jun 20 at **23,266 MW**, 19:00 ET). Filtered to `backend/data/isone_jun2024.csv`. The forecast line is rendered on the dashboard chart so you can see ISO-NE's own demand prediction next to the actual demand. | Public domain |
+| [EIA Open Data v2 API](https://www.eia.gov/opendata/) (`electricity/rto/region-data`, `respondent=ISNE`) | Optional **Live data mode**: pulls today's actual ISO-NE demand from EIA-930 in real time. Toggled in the dashboard header. Requires free API key. | Public domain |
 | [OpenRouter](https://openrouter.ai/) → `anthropic/claude-sonnet-4.5` (default; configurable via `OPENROUTER_MODEL`) | Both LLM agents. OpenAI-compatible chat completions with function calling, `temperature=0`. Falls back to a deterministic canned arc if no key or any live error. | Commercial (user supplies key) |
-| [us-atlas](https://github.com/topojson/us-atlas) `states-10m.json` | TopoJSON for the New England map. | ISC |
+| [us-atlas](https://github.com/topojson/us-atlas) `states-10m.json` | TopoJSON for the pannable / zoomable New England map. | ISC |
+
+Inspired-by but not used (would replace the bundled CSV in a production version): GridStatus.io Python library (multi-ISO unified client), PJM Data Miner 2 (for the federation roadmap), LBNL US Data Center Energy Report (the source of our 2025 ⇒ 2030 load-growth numbers).
 
 All data is unclassified and publicly available. ITAR/EAR-clean.
 

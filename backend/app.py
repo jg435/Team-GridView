@@ -126,6 +126,7 @@ class RunState:
                 "ts_local": g.ts_local,
                 "frequency_hz": round(g.frequency_hz, 4),
                 "base_demand_mw": round(g.base_demand_mw, 1),
+                "demand_forecast_mw": round(g.demand_forecast_mw, 1),
                 "dc_load_mw": round(g.dc_load_mw, 1),
                 "committed_shed_mw": round(g.committed_shed_mw, 1),
                 "total_load_mw": round(g.total_load_mw, 1),
@@ -209,6 +210,7 @@ async def run_scenario(mode: str, data_source: str = "replay") -> None:
         rs.grid.tick = t["tick"]
         rs.grid.ts_local = t["ts_local"]
         rs.grid.base_demand_mw = float(t["demand_mw"])
+        rs.grid.demand_forecast_mw = float(t.get("forecast_mw", t["demand_mw"]))
 
         # apply scenario events at this tick
         for ev in heat_dome.find_events(i):
