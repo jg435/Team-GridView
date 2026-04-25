@@ -1,0 +1,41 @@
+--------------------------------------------------------------
+SCSP HACKATHON 2026 — ROUND 1 SUBMISSION EMAIL
+Send Sunday Apr 26, 2026 by 5:00 PM local
+To: hack@scsp.ai
+--------------------------------------------------------------
+
+Subject: SCSP Hackathon team gridview Electric Grid Optimization
+
+Body:
+------
+Github link: https://github.com/jg435/Team-GridView
+
+Attached: README.md (also visible at the GitHub link above).
+
+Team: team gridview
+Track: Electric Grid Optimization
+Members:
+- Jayesh Gupta
+
+Brief: GridParley — multi-agent system where an ISO-NE control-room
+agent (Claude) and a hyperscaler data-center fleet agent (Claude)
+negotiate workload curtailment under FERC's December 2025 Non-Firm
+Contract Demand tariff. A deterministic policy validator catches every
+LLM mistake before it touches the grid; a 50-trial red-team eval shows
+100% catch rate and 0 false positives across perturbed prompts. Replay
+mode runs against real EIA-930 ISO-NE data from the Jun 2024 heat dome;
+Live mode pulls today's actual demand from the EIA v2 API.
+
+Demo, datasets/APIs, run instructions, and judging-rubric mapping are
+in the attached README.md.
+
+Thanks,
+Jayesh
+team gridview · Boston
+------
+
+ACTION ITEMS BEFORE SENDING:
+1. Attach /Users/jayesh/scsp/README.md to the email
+2. Confirm GitHub repo at https://github.com/jg435/Team-GridView is public
+3. Send by 5:00 PM Sun Apr 26 local time
+4. Bring a laptop with the repo cloned + .env populated for the in-person demo (5-7 PM)
