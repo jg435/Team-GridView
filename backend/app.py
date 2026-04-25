@@ -17,7 +17,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from grid_model import GridState, F_NOMINAL, F_CAUTION, step
 from policy import JOB_MANIFEST, PROTECTED_LOADS, required_curtailment_mw, curtailment_trigger
 from validator import validate_dc_proposal
-from replay import demo_window_ticks
+from replay import demo_window_ticks, live_window_ticks
+from eia_client import has_eia_key
 import scenarios.heat_dome as heat_dome
 
 
@@ -35,6 +36,7 @@ class TranscriptMessage:
 @dataclass
 class RunState:
     mode: str = "idle"             # "idle" | "baseline" | "gridparley"
+    data_source: str = "replay"    # "replay" | "live"
     scenario_tick: int = 0
     grid: GridState = field(default_factory=GridState)
     transcript: list[TranscriptMessage] = field(default_factory=list)
@@ -114,6 +116,7 @@ class RunState:
         }
         return {
             "mode": self.mode,
+            "data_source": self.data_source,
             "scenario_tick": self.scenario_tick,
             "thinking": self.thinking,
             "thinking_actor": self.thinking_actor,
@@ -167,19 +170,38 @@ async def broadcast(state_dict: dict) -> None:
 
 # === Scenario runner ======================================================
 
-async def run_scenario(mode: str) -> None:
+async def run_scenario(mode: str, data_source: str = "replay") -> None:
     """Drive the demo window forward one tick per second of wall time.
     mode = 'baseline' (no agents) | 'gridparley' (with agent negotiation).
+    data_source = 'replay' (Jun 2024 EIA CSV) | 'live' (current EIA-930 API).
     """
     from agents.orchestrator import run_negotiation  # lazy to allow no-API-key runs
 
     global _run_state
     async with _run_lock:
-        _run_state = RunState(mode=mode)
-    ticks = demo_window_ticks()
+        _run_state = RunState(mode=mode, data_source=data_source)
+    rs = _run_state
+    if data_source == "live":
+        try:
+            ticks = await live_window_ticks(hours_back=4)
+            rs.transcript.append(TranscriptMessage(
+                sender="system", kind="narrate",
+                text=f"LIVE DATA · pulled {len(ticks)//heat_dome.TICKS_PER_HOUR if False else 4} hours of real ISO-NE demand from EIA-930.",
+                ts_local=ticks[0]["ts_local"] if ticks else "",
+            ))
+        except Exception as e:
+            # Fall back to the replay if EIA fetch fails so demo never stalls
+            rs.transcript.append(TranscriptMessage(
+                sender="system", kind="narrate",
+                text=f"⚠ Could not fetch live EIA data ({type(e).__name__}: {e}). Falling back to Jun 2024 replay.",
+                ts_local="",
+            ))
+            rs.data_source = "replay"
+            ticks = demo_window_ticks()
+    else:
+        ticks = demo_window_ticks()
     if not ticks:
         return
-    rs = _run_state
     rs.grid.dc_load_mw = heat_dome.DC_LOAD_MW
 
     for i, t in enumerate(ticks):
@@ -258,6 +280,7 @@ async def health():
     return {
         "ok": True,
         "openrouter_key": bool(os.getenv("OPENROUTER_API_KEY")),
+        "eia_key": has_eia_key(),
         "demo_mode": os.getenv("DEMO_MODE", "live"),
         "model": os.getenv("OPENROUTER_MODEL", "anthropic/claude-sonnet-4.5"),
     }
@@ -269,19 +292,27 @@ async def get_state():
 
 
 @app.post("/run/{mode}")
-async def run(mode: str):
+async def run(mode: str, source: str = "replay"):
+    """Start a scenario.
+
+    mode   = 'baseline' | 'gridparley'
+    source = 'replay' (Jun 2024 EIA CSV) | 'live' (current EIA-930 API; needs EIA_API_KEY)
+    """
     global _active_task
     if mode not in ("baseline", "gridparley"):
         return {"error": f"unknown mode {mode}"}
-    # cancel any in-flight scenario before starting a new one
+    if source not in ("replay", "live"):
+        return {"error": f"unknown source {source}"}
+    if source == "live" and not has_eia_key():
+        return {"error": "EIA_API_KEY not configured; live data unavailable"}
     if _active_task and not _active_task.done():
         _active_task.cancel()
         try:
             await _active_task
         except (asyncio.CancelledError, Exception):
             pass
-    _active_task = asyncio.create_task(run_scenario(mode))
-    return {"started": mode}
+    _active_task = asyncio.create_task(run_scenario(mode, source))
+    return {"started": mode, "source": source}
 
 
 @app.post("/reset")

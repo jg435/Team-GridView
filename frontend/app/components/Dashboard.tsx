@@ -24,7 +24,7 @@ const initialResult = {
 };
 
 const initialState: AppState = {
-  mode: "idle", scenario_tick: 0, grid: initialGrid,
+  mode: "idle", data_source: "replay", scenario_tick: 0, grid: initialGrid,
   transcript: [], finished: false, protected_loads: [], job_manifest: [],
   result: initialResult, thinking: null, thinking_actor: null,
 };
@@ -44,6 +44,8 @@ export default function Dashboard() {
   const wsRef = useRef<WebSocket | null>(null);
   const lastTickRef = useRef<number>(-1);
   const [wsStatus, setWsStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
+  const [eiaKeyAvailable, setEiaKeyAvailable] = useState<boolean>(false);
+  const [dataSource, setDataSource] = useState<"replay" | "live">("replay");
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
 
@@ -108,13 +110,19 @@ export default function Dashboard() {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [state.transcript.length, state.thinking]);
 
+  // Probe backend for EIA key availability on mount
+  useEffect(() => {
+    fetch(`${BACKEND}/health`).then(r => r.json()).then(h => {
+      setEiaKeyAvailable(!!h.eia_key);
+    }).catch(() => {});
+  }, []);
+
   const trigger = async (path: "run/baseline" | "run/gridparley" | "reset") => {
-    if (path === "reset") {
-      setSeries([]); lastTickRef.current = -1;
-    } else {
-      setSeries([]); lastTickRef.current = -1;
-    }
-    await fetch(`${BACKEND}/${path}`, { method: "POST" }).catch(() => {});
+    setSeries([]); lastTickRef.current = -1;
+    const url = path === "reset"
+      ? `${BACKEND}/reset`
+      : `${BACKEND}/${path}?source=${dataSource}`;
+    await fetch(url, { method: "POST" }).catch(() => {});
   };
 
   const g = state.grid;
@@ -149,6 +157,12 @@ export default function Dashboard() {
         </div>
         <div className="flex gap-2 items-center">
           <WsBadge status={wsStatus} />
+          <DataSourceToggle
+            value={dataSource}
+            onChange={setDataSource}
+            eiaKeyAvailable={eiaKeyAvailable}
+            disabled={state.mode !== "idle" && !state.finished}
+          />
           <ModeBadge mode={state.mode} finished={state.finished} />
           <button onClick={() => trigger("run/baseline")}
             disabled={state.mode !== "idle" && !state.finished}
@@ -377,6 +391,40 @@ function ChartLegend() {
           {it.label}
         </span>
       ))}
+    </div>
+  );
+}
+
+function DataSourceToggle({
+  value, onChange, eiaKeyAvailable, disabled,
+}: {
+  value: "replay" | "live";
+  onChange: (v: "replay" | "live") => void;
+  eiaKeyAvailable: boolean;
+  disabled: boolean;
+}) {
+  const liveTitle = eiaKeyAvailable
+    ? "Pull last 4 hours of real ISO-NE demand from EIA-930 API at run start."
+    : "Set EIA_API_KEY in backend/.env to enable live data.";
+  return (
+    <div className={`flex rounded-md border border-zinc-800 bg-zinc-900 overflow-hidden text-[10px] uppercase tracking-widest ${disabled ? "opacity-40" : ""}`}>
+      <button
+        onClick={() => onChange("replay")}
+        disabled={disabled}
+        className={`px-3 py-1.5 ${value === "replay" ? "bg-zinc-700 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"}`}
+        title="Replay Jun 2024 heat-dome day from bundled EIA-930 file."
+      >
+        Replay
+      </button>
+      <button
+        onClick={() => onChange("live")}
+        disabled={disabled || !eiaKeyAvailable}
+        className={`px-3 py-1.5 flex items-center gap-1.5 ${value === "live" && eiaKeyAvailable ? "bg-emerald-700/60 text-emerald-100" : "text-zinc-500 hover:text-zinc-300"} ${!eiaKeyAvailable ? "cursor-not-allowed" : ""}`}
+        title={liveTitle}
+      >
+        {value === "live" && eiaKeyAvailable && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />}
+        Live
+      </button>
     </div>
   );
 }

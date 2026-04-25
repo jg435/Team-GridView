@@ -64,6 +64,27 @@ def demo_window_ticks() -> list[dict]:
     return [t for t in ticks if start_t <= t["tick"] < end_t]
 
 
+async def live_window_ticks(hours_back: int = 4) -> list[dict]:
+    """Fetch the most recent `hours_back` hours of ISO-NE demand from EIA
+    and expand to 5-min-per-tick ticks. Drop-in replacement for
+    demo_window_ticks() so the scenario runner doesn't care which source.
+    """
+    from eia_client import fetch_isone_recent_hours
+
+    rows_dict = await fetch_isone_recent_hours(hours_back=hours_back + 1)
+    if len(rows_dict) < 2:
+        raise RuntimeError(f"EIA returned {len(rows_dict)} rows; need ≥2")
+    hours = [
+        HourlyRow(
+            ts_utc=r["ts_utc"], ts_local=r["ts_local"],
+            demand_mw=r["demand_mw"], demand_forecast_mw=r["demand_mw"],
+            net_gen_mw=0, interchange_mw=0,
+        )
+        for r in rows_dict
+    ]
+    return expand_to_ticks(hours)
+
+
 if __name__ == "__main__":
     hours = load_hours()
     print(f"loaded {len(hours)} hourly rows")
