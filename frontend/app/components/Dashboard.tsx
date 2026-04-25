@@ -168,11 +168,17 @@ export default function Dashboard() {
               </LineChart>
             </ResponsiveContainer>
           </div>
-          <div className="text-[11px] text-zinc-500 mt-1 leading-tight">
-            <strong className="text-emerald-400">Green</strong> = generation available ·
-            <strong className="text-purple-300"> purple</strong> = total load (base + DC, post-curtailment) ·
-            <strong className="text-blue-300"> blue dashed</strong> = base demand ·
-            <strong className="text-amber-400"> yellow</strong> = grid frequency (left axis). Healthy grid: green &gt; purple, yellow ≈ 60.0.
+          <div className="text-[11px] text-zinc-500 mt-1 leading-tight space-y-1">
+            <div>
+              <strong className="text-emerald-400">Green</strong> = generation capacity available ·
+              <strong className="text-purple-300"> purple</strong> = total load (base + AI data center, post-curtailment) ·
+              <strong className="text-blue-300"> blue dashed</strong> = New England base demand (2024 actual) ·
+              <strong className="text-amber-400"> yellow</strong> = grid frequency (left axis).
+            </div>
+            <div className="text-zinc-600">
+              <strong className="text-amber-400">Frequency is the grid&apos;s heartbeat.</strong> 60.00 Hz = healthy.
+              Below <strong className="text-amber-400">59.95</strong> the ISO must intervene; below <strong className="text-rose-400">59.50</strong> automatic load-shedding kicks in (lights go out in neighborhoods). Healthy state: green above purple, yellow at 60.0.
+            </div>
           </div>
         </section>
 
