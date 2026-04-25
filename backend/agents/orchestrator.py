@@ -24,8 +24,8 @@ from agents.dc_agent import DC_SYSTEM_PROMPT, fleet_manifest_view
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = os.getenv("OPENROUTER_MODEL", "anthropic/claude-sonnet-4.5")
-APP_REFERER = "https://github.com/teamgridview/scsp-gridparley"
-APP_TITLE = "GridParley · SCSP Hackathon 2026"
+APP_REFERER = "https://github.com/jg435/Team-GridView"
+APP_TITLE = "GridParley - SCSP Hackathon 2026"
 
 
 async def run_negotiation(rs, broadcast: Callable[[dict], Awaitable[None]]) -> None:

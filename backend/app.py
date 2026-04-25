@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+
+from dotenv import load_dotenv
+load_dotenv()  # read backend/.env if present (OPENROUTER_API_KEY, OPENROUTER_MODEL, DEMO_MODE)
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
