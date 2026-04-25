@@ -1,0 +1,7 @@
+To: hack@scsp.ai
+Subject: SCSP Hackathon team gridview FINAL
+
+Our team name is team gridview.
+Our track is Electric Grid Optimization.
+Our members are:
+- Jayesh Gupta

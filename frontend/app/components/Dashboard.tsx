@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import {
-  LineChart, Line, XAxis, YAxis, ReferenceLine, ResponsiveContainer, Tooltip, CartesianGrid,
+  LineChart, Line, XAxis, YAxis, ReferenceLine, ReferenceArea, ResponsiveContainer, Tooltip, CartesianGrid, Legend,
 } from "recharts";
 import type { AppState, TranscriptMessage } from "@/app/lib/types";
 
@@ -25,8 +25,9 @@ interface ChartPoint {
   tick: number;
   ts: string;
   freq: number;
-  demand: number;
-  total: number;
+  demand: number;       // base demand (residential + industrial)
+  total: number;        // base + DC load (after curtailment)
+  genAvailable: number; // gen capacity minus tripped
 }
 
 export default function Dashboard() {
@@ -55,6 +56,7 @@ export default function Dashboard() {
                 freq: s.grid.frequency_hz,
                 demand: s.grid.base_demand_mw,
                 total: s.grid.total_load_mw,
+                genAvailable: s.grid.gen_available_mw,
               },
             ]);
           }
@@ -135,25 +137,42 @@ export default function Dashboard() {
       <div className="flex-1 grid grid-cols-12 gap-px bg-zinc-800 min-h-0">
         {/* Chart */}
         <section className="col-span-8 bg-zinc-950 p-4 flex flex-col min-h-0">
-          <div className="text-xs uppercase tracking-widest text-zinc-500 mb-2">Grid State (Jun 20 2024 · ISO-NE replay)</div>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xs uppercase tracking-widest text-zinc-500">Grid State · Jun 20 2024 ISO-NE replay</div>
+            <ChartLegend />
+          </div>
           <div className="flex-1 min-h-[260px]">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={series} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
                 <CartesianGrid stroke="#27272a" strokeDasharray="3 3" />
-                <XAxis dataKey="tick" stroke="#71717a" tick={{ fontSize: 11 }} />
-                <YAxis yAxisId="freq" domain={[59.5, 60.2]} stroke="#fbbf24" tick={{ fontSize: 11 }} width={48} />
+                <XAxis dataKey="tick" stroke="#71717a" tick={{ fontSize: 11 }} label={{ value: "scenario tick (5 min sim per tick)", fill: "#52525b", fontSize: 10, position: "insideBottom", offset: -2 }} />
+                <YAxis yAxisId="freq" domain={[59.5, 60.2]} stroke="#fbbf24" tick={{ fontSize: 11 }} width={56}
+                  label={{ value: "Hz", angle: -90, fill: "#fbbf24", fontSize: 10, position: "insideLeft", offset: 8 }} />
                 <YAxis yAxisId="mw" orientation="right" stroke="#60a5fa" tick={{ fontSize: 11 }} width={64}
-                  tickFormatter={(v) => `${(v/1000).toFixed(0)}G`} />
+                  domain={[10000, 28000]}
+                  tickFormatter={(v) => `${(v/1000).toFixed(0)} GW`}
+                  label={{ value: "MW", angle: 90, fill: "#60a5fa", fontSize: 10, position: "insideRight", offset: 8 }} />
                 <Tooltip
                   contentStyle={{ background: "#09090b", border: "1px solid #27272a", borderRadius: 4, fontSize: 12 }}
-                  labelStyle={{ color: "#a1a1aa" }} />
-                <ReferenceLine yAxisId="freq" y={60} stroke="#52525b" strokeDasharray="2 2" />
-                <ReferenceLine yAxisId="freq" y={59.95} stroke="#f59e0b" strokeDasharray="2 2" label={{ value: "caution", fill: "#f59e0b", fontSize: 10, position: "insideRight" }} />
-                <Line yAxisId="freq" type="monotone" dataKey="freq" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} name="Frequency (Hz)" />
-                <Line yAxisId="mw" type="monotone" dataKey="demand" stroke="#60a5fa" strokeWidth={2} dot={false} isAnimationActive={false} name="Demand (MW)" />
-                <Line yAxisId="mw" type="monotone" dataKey="total" stroke="#a78bfa" strokeWidth={1.5} strokeDasharray="3 3" dot={false} isAnimationActive={false} name="Demand + DC (MW)" />
+                  labelStyle={{ color: "#a1a1aa" }}
+                  formatter={(v: number, name: string) => name === "Frequency"
+                    ? [`${v.toFixed(3)} Hz`, name]
+                    : [`${v.toFixed(0)} MW`, name]} />
+                <ReferenceLine yAxisId="freq" y={60} stroke="#52525b" strokeDasharray="2 2" label={{ value: "60 Hz nominal", fill: "#71717a", fontSize: 10, position: "insideTopRight" }} />
+                <ReferenceLine yAxisId="freq" y={59.95} stroke="#f59e0b" strokeDasharray="2 2" label={{ value: "caution 59.95", fill: "#f59e0b", fontSize: 10, position: "insideBottomRight" }} />
+                <ReferenceLine yAxisId="mw" x={18} stroke="#ef4444" strokeWidth={1.5} strokeDasharray="4 2" label={{ value: "Mystic 8 trip · -400 MW", fill: "#ef4444", fontSize: 10, position: "insideTop" }} />
+                <Line yAxisId="mw" type="stepAfter" dataKey="genAvailable" stroke="#10b981" strokeWidth={2} dot={false} isAnimationActive={false} name="Gen available" />
+                <Line yAxisId="mw" type="monotone" dataKey="total" stroke="#a78bfa" strokeWidth={2} dot={false} isAnimationActive={false} name="Total load (incl DC)" />
+                <Line yAxisId="mw" type="monotone" dataKey="demand" stroke="#60a5fa" strokeWidth={1.5} strokeDasharray="3 3" dot={false} isAnimationActive={false} name="Base demand" />
+                <Line yAxisId="freq" type="monotone" dataKey="freq" stroke="#fbbf24" strokeWidth={2.5} dot={false} isAnimationActive={false} name="Frequency" />
               </LineChart>
             </ResponsiveContainer>
+          </div>
+          <div className="text-[11px] text-zinc-500 mt-1 leading-tight">
+            <strong className="text-emerald-400">Green</strong> = generation available ·
+            <strong className="text-purple-300"> purple</strong> = total load (base + DC, post-curtailment) ·
+            <strong className="text-blue-300"> blue dashed</strong> = base demand ·
+            <strong className="text-amber-400"> yellow</strong> = grid frequency (left axis). Healthy grid: green &gt; purple, yellow ≈ 60.0.
           </div>
         </section>
 
@@ -207,6 +226,26 @@ export default function Dashboard() {
           {state.transcript.map((m, i) => <TranscriptRow key={i} m={m} />)}
         </div>
       </section>
+    </div>
+  );
+}
+
+function ChartLegend() {
+  const items = [
+    { color: "#10b981", label: "Gen available", shape: "line" },
+    { color: "#a78bfa", label: "Total load", shape: "line" },
+    { color: "#60a5fa", label: "Base demand", shape: "dashed" },
+    { color: "#fbbf24", label: "Frequency", shape: "line" },
+  ];
+  return (
+    <div className="flex gap-3 text-[11px] text-zinc-400">
+      {items.map((it) => (
+        <span key={it.label} className="flex items-center gap-1.5">
+          <span className={`inline-block w-3 h-0.5 ${it.shape === "dashed" ? "border-t border-dashed" : ""}`}
+            style={{ background: it.shape === "line" ? it.color : undefined, borderColor: it.shape === "dashed" ? it.color : undefined }} />
+          {it.label}
+        </span>
+      ))}
     </div>
   );
 }

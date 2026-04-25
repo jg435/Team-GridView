@@ -6,7 +6,7 @@
 
 | | |
 |---|---|
-| Team | _(to be finalized — see "Team" below)_ |
+| Team | **team gridview** |
 | Track | Electric Grid Optimization |
 | Members | Jayesh Gupta (solo) |
 | Live demo | `localhost:3002` after `npm run dev` (see "Run") |
@@ -151,7 +151,7 @@ The transcript is identical in structure but bypasses Claude. Used as a fallback
 
 ## Team
 
-_(to be finalized before the 2 PM Sat registration deadline. Final team email goes to `hack@scsp.ai` with subject `SCSP Hackathon <Team Name> FINAL`.)_
+**team gridview** — Jayesh Gupta (solo). Boston site, Electric Grid Optimization track. Registered with SCSP per the 2 PM Sat deadline.
 
 ---
 
