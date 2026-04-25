@@ -1,12 +1,14 @@
 """Negotiation orchestrator.
 
 Two paths:
-  • LIVE: Claude-driven multi-turn loop with validator gate (default).
+  • LIVE: OpenRouter-hosted LLM (default Claude Sonnet) drives a multi-turn
+    negotiation through OpenAI-compatible function calling. Validator gates
+    every tool call.
   • REPLAY: deterministic canned arc (fallback if no key, error, or
     `DEMO_MODE=replay`).
 
-Both produce identical user-visible state — same transcript shape, same
-final committed_shed_mw — so the demo always works.
+Both paths produce identical user-visible state — same transcript shape,
+same final committed_shed_mw — so the demo always works.
 """
 from __future__ import annotations
 import asyncio
@@ -20,15 +22,17 @@ from agents.tools import ISO_TOOLS, DC_TOOLS
 from agents.iso_agent import ISO_SYSTEM_PROMPT
 from agents.dc_agent import DC_SYSTEM_PROMPT, fleet_manifest_view
 
-ANTHROPIC_MODEL = os.getenv("GRIDPARLEY_MODEL", "claude-sonnet-4-6")
-MAX_TURNS = 6   # hard cap
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_MODEL = os.getenv("OPENROUTER_MODEL", "anthropic/claude-sonnet-4.5")
+APP_REFERER = "https://github.com/teamgridview/scsp-gridparley"
+APP_TITLE = "GridParley · SCSP Hackathon 2026"
 
 
 async def run_negotiation(rs, broadcast: Callable[[dict], Awaitable[None]]) -> None:
     """Entry point called by app.run_scenario at the arm_agents tick."""
     use_canned = (
         os.getenv("DEMO_MODE", "").lower() == "replay"
-        or not os.getenv("ANTHROPIC_API_KEY")
+        or not os.getenv("OPENROUTER_API_KEY")
     )
     if use_canned:
         return await _run_canned(rs, broadcast)
@@ -52,16 +56,41 @@ async def _emit(rs, broadcast, sender: str, kind: str, text: str, payload: dict 
     await asyncio.sleep(0.6)
 
 
-# ---------- LIVE path: real Claude calls ----------
+# ---------- LIVE path: OpenRouter-hosted LLM ----------
+
+def _make_client():
+    from openai import AsyncOpenAI
+    return AsyncOpenAI(
+        api_key=os.environ["OPENROUTER_API_KEY"],
+        base_url=OPENROUTER_BASE_URL,
+        default_headers={
+            "HTTP-Referer": APP_REFERER,
+            "X-Title": APP_TITLE,
+        },
+    )
+
+
+def _first_tool_call(message, name: str):
+    for tc in (message.tool_calls or []):
+        if tc.function.name == name:
+            return tc
+    return None
+
+
+def _parse_args(tc) -> dict:
+    try:
+        return json.loads(tc.function.arguments)
+    except json.JSONDecodeError:
+        return {}
+
 
 async def _run_live(rs, broadcast):
-    from anthropic import AsyncAnthropic
-    client = AsyncAnthropic()
+    client = _make_client()
 
     g = rs.grid
     requested = max(200, int(required_curtailment_mw(g.frequency_hz, g.reserve_margin_pct)))
     if requested < 50:
-        requested = 240  # demo floor
+        requested = 240
 
     # === Turn 1: ISO request_curtailment ===
     iso_user = (
@@ -75,45 +104,54 @@ async def _run_live(rs, broadcast):
         f"\nA generator just tripped. Issue a `request_curtailment` tool call. "
         f"Need at least {requested} MW shed within 90 seconds."
     )
-    iso_resp = await client.messages.create(
-        model=ANTHROPIC_MODEL,
+    iso_resp = await client.chat.completions.create(
+        model=DEFAULT_MODEL,
         max_tokens=512,
         temperature=0,
-        system=ISO_SYSTEM_PROMPT,
         tools=ISO_TOOLS,
-        messages=[{"role": "user", "content": iso_user}],
+        tool_choice={"type": "function", "function": {"name": "request_curtailment"}},
+        messages=[
+            {"role": "system", "content": ISO_SYSTEM_PROMPT},
+            {"role": "user", "content": iso_user},
+        ],
     )
-    req_call = _first_tool_use(iso_resp, "request_curtailment")
-    if req_call is None:
+    iso_msg = iso_resp.choices[0].message
+    req_tc = _first_tool_call(iso_msg, "request_curtailment")
+    if req_tc is None:
         raise RuntimeError("ISO did not call request_curtailment")
-    req_args = req_call.input
+    req_args = _parse_args(req_tc)
     requested_mw = int(req_args.get("mw_required", requested))
     deadline_s = int(req_args.get("deadline_seconds", 90))
     iso_reason = str(req_args.get("reason", ""))
-    await _emit(rs, broadcast, "iso", "speech", iso_reason or f"Request {requested_mw} MW shed within {deadline_s}s.",
+    await _emit(rs, broadcast, "iso", "speech",
+                iso_reason or f"Request {requested_mw} MW shed within {deadline_s}s.",
                 {"mw_required": requested_mw, "deadline_s": deadline_s})
 
     # === Turn 2: DC propose_shed (likely BAD bid) ===
     manifest_json = json.dumps(fleet_manifest_view(), indent=2)
-    dc_history = [
+    dc_messages = [
+        {"role": "system", "content": DC_SYSTEM_PROMPT},
         {"role": "user", "content": (
             f"Your fleet manifest (sheddable workloads):\n```json\n{manifest_json}\n```\n\n"
-            f"ISO-NE just requested {requested_mw} MW shed within {deadline_s}s. Reason: {iso_reason!r}.\n"
-            f"Call `propose_shed` with the cheapest, fastest-restart combination that meets the request."
+            f"ISO-NE just requested {requested_mw} MW shed within {deadline_s}s. "
+            f"Reason: {iso_reason!r}.\n"
+            f"Call `propose_shed` with the cheapest, fastest-restart combination that "
+            f"meets the request."
         )},
     ]
-    dc_resp = await client.messages.create(
-        model=ANTHROPIC_MODEL,
+    dc_resp = await client.chat.completions.create(
+        model=DEFAULT_MODEL,
         max_tokens=512,
         temperature=0,
-        system=DC_SYSTEM_PROMPT,
         tools=DC_TOOLS,
-        messages=dc_history,
+        tool_choice={"type": "function", "function": {"name": "propose_shed"}},
+        messages=dc_messages,
     )
-    propose = _first_tool_use(dc_resp, "propose_shed")
-    if propose is None:
+    dc_msg = dc_resp.choices[0].message
+    propose_tc = _first_tool_call(dc_msg, "propose_shed")
+    if propose_tc is None:
         raise RuntimeError("DC did not call propose_shed")
-    p_args = propose.input
+    p_args = _parse_args(propose_tc)
     paused_ids = list(p_args.get("paused_job_ids", []))
     total = int(p_args.get("total_shed_mw", 0))
     notes = str(p_args.get("notes", ""))
@@ -129,30 +167,39 @@ async def _run_live(rs, broadcast):
 
     # If rejected, give DC one revision turn
     if not result.ok:
-        dc_history.extend([
-            {"role": "assistant", "content": dc_resp.content},
-            {"role": "user", "content": [{
-                "type": "tool_result",
-                "tool_use_id": propose.id,
+        dc_messages.extend([
+            {
+                "role": "assistant",
+                "content": dc_msg.content,
+                "tool_calls": [{
+                    "id": propose_tc.id,
+                    "type": "function",
+                    "function": {"name": propose_tc.function.name, "arguments": propose_tc.function.arguments},
+                }],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": propose_tc.id,
                 "content": json.dumps(result.to_tool_result()),
-            }]},
+            },
             {"role": "user", "content": (
                 "Validator rejected. Drop the flagged IDs and propose again with replacements "
-                "from the training pool only."
+                "from the training pool only. Call `propose_shed` again."
             )},
         ])
-        dc_resp2 = await client.messages.create(
-            model=ANTHROPIC_MODEL,
+        dc_resp2 = await client.chat.completions.create(
+            model=DEFAULT_MODEL,
             max_tokens=512,
             temperature=0,
-            system=DC_SYSTEM_PROMPT,
             tools=DC_TOOLS,
-            messages=dc_history,
+            tool_choice={"type": "function", "function": {"name": "propose_shed"}},
+            messages=dc_messages,
         )
-        propose2 = _first_tool_use(dc_resp2, "propose_shed")
-        if propose2 is None:
+        dc_msg2 = dc_resp2.choices[0].message
+        propose_tc2 = _first_tool_call(dc_msg2, "propose_shed")
+        if propose_tc2 is None:
             raise RuntimeError("DC failed to revise after validator reject")
-        p2 = propose2.input
+        p2 = _parse_args(propose_tc2)
         paused_ids = list(p2.get("paused_job_ids", []))
         total = int(p2.get("total_shed_mw", 0))
         notes = str(p2.get("notes", ""))
@@ -169,29 +216,29 @@ async def _run_live(rs, broadcast):
         f"Data center has committed: {total} MW shed via job IDs {paused_ids}. "
         f"Validator approved. Call `accept_proposal`."
     )
-    iso_resp2 = await client.messages.create(
-        model=ANTHROPIC_MODEL,
+    iso_resp2 = await client.chat.completions.create(
+        model=DEFAULT_MODEL,
         max_tokens=300,
         temperature=0,
-        system=ISO_SYSTEM_PROMPT,
         tools=ISO_TOOLS,
-        messages=[{"role": "user", "content": iso2_user}],
+        tool_choice={"type": "function", "function": {"name": "accept_proposal"}},
+        messages=[
+            {"role": "system", "content": ISO_SYSTEM_PROMPT},
+            {"role": "user", "content": iso2_user},
+        ],
     )
-    accept = _first_tool_use(iso_resp2, "accept_proposal")
-    note = (accept.input if accept else {}).get("settlement_note") or \
-           f"Accepted: {total} MW × 30 min @ $180/MWh ≈ ${total*0.5*180:.0f}. Commit signed."
+    iso_msg2 = iso_resp2.choices[0].message
+    accept_tc = _first_tool_call(iso_msg2, "accept_proposal")
+    accept_args = _parse_args(accept_tc) if accept_tc else {}
+    note = (
+        accept_args.get("settlement_note")
+        or f"Accepted: {total} MW × 30 min @ $180/MWh ≈ ${total*0.5*180:.0f}. Commit signed."
+    )
     await _emit(rs, broadcast, "iso", "speech", note, {"committed_mw": total})
 
     # Apply commitment to grid
     rs.grid.committed_shed_mw = float(total)
     await broadcast(rs.to_dict())
-
-
-def _first_tool_use(resp, name: str):
-    for block in resp.content:
-        if getattr(block, "type", None) == "tool_use" and block.name == name:
-            return block
-    return None
 
 
 # ---------- REPLAY path: canned arc ----------

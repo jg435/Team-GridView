@@ -158,8 +158,9 @@ app.add_middleware(
 async def health():
     return {
         "ok": True,
-        "anthropic_key": bool(os.getenv("ANTHROPIC_API_KEY")),
+        "openrouter_key": bool(os.getenv("OPENROUTER_API_KEY")),
         "demo_mode": os.getenv("DEMO_MODE", "live"),
+        "model": os.getenv("OPENROUTER_MODEL", "anthropic/claude-sonnet-4.5"),
     }
 
 

@@ -36,7 +36,7 @@
 | Source | Use | License |
 |---|---|---|
 | [EIA Form-930 Hourly Electric Grid Monitor](https://www.eia.gov/electricity/gridmonitor/) | Real ISO-NE hourly demand for Jun 14–20 2024 (heat-dome week). Filtered to `backend/data/isone_jun2024.csv`. | Public domain (US Government) |
-| [Anthropic Claude API](https://docs.claude.com/en/api) | Both agents are `claude-sonnet-4-6` calls with tool use, `temperature=0`. Falls back to a deterministic canned arc if `ANTHROPIC_API_KEY` is unset or any live error occurs. | Commercial; user supplies own key |
+| [OpenRouter](https://openrouter.ai/) → `anthropic/claude-sonnet-4.5` (default; configurable) | Both agents are OpenAI-compatible chat-completion calls with function calling, `temperature=0`, routed to OpenRouter. Falls back to a deterministic canned arc if `OPENROUTER_API_KEY` is unset or any live error occurs. | Commercial; user supplies own key |
 | [Electricity Maps free tier](https://www.electricitymaps.com/free-tier-api) (planned) | Carbon intensity overlay for the demo (cached at boot). | Free for non-commercial |
 
 All data is unclassified and publicly available. ITAR/EAR-clean.
@@ -96,10 +96,9 @@ All data is unclassified and publicly available. ITAR/EAR-clean.
 cd backend
 uv venv             # or: python3 -m venv .venv
 source .venv/bin/activate
-uv pip install fastapi 'uvicorn[standard]' anthropic httpx pandas python-dotenv websockets
-# or: pip install -r requirements.txt   (if present)
+uv pip install -r requirements.txt
 cp .env.example .env
-# edit .env: paste your ANTHROPIC_API_KEY (without one, the canned demo arc plays)
+# edit .env: paste your OPENROUTER_API_KEY (without one, the canned demo arc plays)
 uvicorn app:app --port 8000
 ```
 
