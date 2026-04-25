@@ -1,0 +1,33 @@
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.vercel/
+
+# Data: keep filtered CSV, ignore the 41MB raw dump
+backend/data/EIA930_BALANCE_*.csv
+
+# Env
+.env
+.env.local
+*.env
+
+# Editor
+.DS_Store
+.vscode/
+.idea/
+
+# Backup video can be large
+pitch/backup_demo.mp4
+pitch/*.mov
+
+# Logs
+*.log
+
+# Hackathon docs (personal, not part of code)
+SCSP Hacker QuickStart*.pdf
