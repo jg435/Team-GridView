@@ -23,10 +23,10 @@ const PINS: Pin[] = [
 
 // fallback: where each pin's label sits relative to the marker
 const LABEL_OFFSETS: Record<string, { dx: number; dy: number; anchor: "start" | "end" | "middle" }> = {
-  hanscom_afb:      { dx: -7, dy: -6, anchor: "end" },
-  mass_general:     { dx: 7,  dy: -2, anchor: "start" },
-  boston_childrens: { dx: 7,  dy: 8,  anchor: "start" },
-  hyperscaler_dc:   { dx: -7, dy: 12, anchor: "end" },
+  hanscom_afb:      { dx: 0,  dy: -8, anchor: "middle" },
+  mass_general:     { dx: 8,  dy: 3,  anchor: "start" },
+  boston_childrens: { dx: 8,  dy: 12, anchor: "start" },
+  hyperscaler_dc:   { dx: -8, dy: 3,  anchor: "end" },
 };
 
 export default function NewEnglandMap() {
@@ -35,10 +35,10 @@ export default function NewEnglandMap() {
       <div className="text-xs uppercase tracking-widest text-zinc-500 mb-1.5">ISO-NE territory · pinned loads</div>
       <div className="flex-1 min-h-0 flex items-center justify-center">
         <ComposableMap
-          projection="geoAlbers"
-          projectionConfig={{ scale: 5400, center: [-71.4, 43.6], rotate: [0, 0, 0] }}
-          width={320}
-          height={200}
+          projection="geoMercator"
+          projectionConfig={{ scale: 5500, center: [-71.3, 43.6] }}
+          width={340}
+          height={260}
           style={{ width: "100%", height: "auto" }}
         >
           <Geographies geography="/us-states-10m.json">
