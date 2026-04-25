@@ -1,86 +1,240 @@
-"""Stub negotiation orchestrator.
+"""Negotiation orchestrator.
 
-Block D will replace this with a real Claude-driven loop. For now, this
-stub performs the deterministic 'guardrail moment' demo arc using canned
-narration so the rest of the system (replay, broadcast, validator wiring)
-can be tested without an Anthropic key.
+Two paths:
+  • LIVE: Claude-driven multi-turn loop with validator gate (default).
+  • REPLAY: deterministic canned arc (fallback if no key, error, or
+    `DEMO_MODE=replay`).
+
+Both produce identical user-visible state — same transcript shape, same
+final committed_shed_mw — so the demo always works.
 """
 from __future__ import annotations
 import asyncio
+import json
 import os
-from dataclasses import asdict
 from typing import Awaitable, Callable
 
 from policy import JOB_MANIFEST, required_curtailment_mw
 from validator import validate_dc_proposal
+from agents.tools import ISO_TOOLS, DC_TOOLS
+from agents.iso_agent import ISO_SYSTEM_PROMPT
+from agents.dc_agent import DC_SYSTEM_PROMPT, fleet_manifest_view
+
+ANTHROPIC_MODEL = os.getenv("GRIDPARLEY_MODEL", "claude-sonnet-4-6")
+MAX_TURNS = 6   # hard cap
 
 
 async def run_negotiation(rs, broadcast: Callable[[dict], Awaitable[None]]) -> None:
-    """Execute the canned negotiation arc against the validator.
+    """Entry point called by app.run_scenario at the arm_agents tick."""
+    use_canned = (
+        os.getenv("DEMO_MODE", "").lower() == "replay"
+        or not os.getenv("ANTHROPIC_API_KEY")
+    )
+    if use_canned:
+        return await _run_canned(rs, broadcast)
+    try:
+        await _run_live(rs, broadcast)
+    except Exception as e:
+        await _emit(rs, broadcast, "system", "narrate",
+                    f"⚠ Live agent loop error: {type(e).__name__}: {e}. Falling back to canned demo arc.")
+        await _run_canned(rs, broadcast)
 
-    rs: RunState (forward-declared via duck typing)
-    broadcast: async fn that pushes the latest state to subscribers.
-    """
-    from app import TranscriptMessage  # avoid circular import
+
+# ---------- shared emit helper ----------
+
+async def _emit(rs, broadcast, sender: str, kind: str, text: str, payload: dict | None = None):
+    from app import TranscriptMessage
+    rs.transcript.append(TranscriptMessage(
+        sender=sender, kind=kind, text=text,
+        payload=payload or {}, ts_local=rs.grid.ts_local,
+    ))
+    await broadcast(rs.to_dict())
+    await asyncio.sleep(0.6)
+
+
+# ---------- LIVE path: real Claude calls ----------
+
+async def _run_live(rs, broadcast):
+    from anthropic import AsyncAnthropic
+    client = AsyncAnthropic()
 
     g = rs.grid
-    requested = max(200.0, required_curtailment_mw(g.frequency_hz, g.reserve_margin_pct))
+    requested = max(200, int(required_curtailment_mw(g.frequency_hz, g.reserve_margin_pct)))
     if requested < 50:
-        requested = 240.0  # demo minimum
+        requested = 240  # demo floor
 
-    async def emit(sender, kind, text, payload=None):
-        rs.transcript.append(TranscriptMessage(
-            sender=sender, kind=kind, text=text,
-            payload=payload or {}, ts_local=g.ts_local,
-        ))
-        await broadcast(rs.to_dict())
-        await asyncio.sleep(0.9)
+    # === Turn 1: ISO request_curtailment ===
+    iso_user = (
+        f"Current grid telemetry:\n"
+        f"  ts: {g.ts_local}\n"
+        f"  frequency: {g.frequency_hz:.4f} Hz\n"
+        f"  reserve_margin: {g.reserve_margin_pct:.2f} %\n"
+        f"  base_demand: {g.base_demand_mw:.0f} MW\n"
+        f"  data_center_load: {g.dc_load_mw:.0f} MW\n"
+        f"  generation_tripped: {g.gen_tripped_mw:.0f} MW\n"
+        f"\nA generator just tripped. Issue a `request_curtailment` tool call. "
+        f"Need at least {requested} MW shed within 90 seconds."
+    )
+    iso_resp = await client.messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=512,
+        temperature=0,
+        system=ISO_SYSTEM_PROMPT,
+        tools=ISO_TOOLS,
+        messages=[{"role": "user", "content": iso_user}],
+    )
+    req_call = _first_tool_use(iso_resp, "request_curtailment")
+    if req_call is None:
+        raise RuntimeError("ISO did not call request_curtailment")
+    req_args = req_call.input
+    requested_mw = int(req_args.get("mw_required", requested))
+    deadline_s = int(req_args.get("deadline_seconds", 90))
+    iso_reason = str(req_args.get("reason", ""))
+    await _emit(rs, broadcast, "iso", "speech", iso_reason or f"Request {requested_mw} MW shed within {deadline_s}s.",
+                {"mw_required": requested_mw, "deadline_s": deadline_s})
 
-    # Turn 1 — ISO requests curtailment
-    await emit("iso", "speech",
-        f"Frequency excursion detected: {g.frequency_hz:.3f} Hz. Reserve margin {g.reserve_margin_pct:.1f}%. "
-        f"Requesting {requested:.0f} MW shed within 90 seconds. Priority loads (Hanscom AFB, Mass General, "
-        f"Boston Children's UPS) must remain at full power.",
+    # === Turn 2: DC propose_shed (likely BAD bid) ===
+    manifest_json = json.dumps(fleet_manifest_view(), indent=2)
+    dc_history = [
+        {"role": "user", "content": (
+            f"Your fleet manifest (sheddable workloads):\n```json\n{manifest_json}\n```\n\n"
+            f"ISO-NE just requested {requested_mw} MW shed within {deadline_s}s. Reason: {iso_reason!r}.\n"
+            f"Call `propose_shed` with the cheapest, fastest-restart combination that meets the request."
+        )},
+    ]
+    dc_resp = await client.messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=512,
+        temperature=0,
+        system=DC_SYSTEM_PROMPT,
+        tools=DC_TOOLS,
+        messages=dc_history,
+    )
+    propose = _first_tool_use(dc_resp, "propose_shed")
+    if propose is None:
+        raise RuntimeError("DC did not call propose_shed")
+    p_args = propose.input
+    paused_ids = list(p_args.get("paused_job_ids", []))
+    total = int(p_args.get("total_shed_mw", 0))
+    notes = str(p_args.get("notes", ""))
+    await _emit(rs, broadcast, "dc", "tool_call",
+                notes or f"Proposing {total} MW from {len(paused_ids)} workloads.",
+                {"paused_job_ids": paused_ids, "total_shed_mw": total,
+                 "marginal_cost_per_mwh": p_args.get("marginal_cost_per_mwh"),
+                 "restart_minutes": p_args.get("restart_minutes")})
+
+    # Validator gate
+    result = validate_dc_proposal(paused_ids, total, requested_mw)
+    await _emit(rs, broadcast, "validator", "tool_result", result.reason, result.to_tool_result())
+
+    # If rejected, give DC one revision turn
+    if not result.ok:
+        dc_history.extend([
+            {"role": "assistant", "content": dc_resp.content},
+            {"role": "user", "content": [{
+                "type": "tool_result",
+                "tool_use_id": propose.id,
+                "content": json.dumps(result.to_tool_result()),
+            }]},
+            {"role": "user", "content": (
+                "Validator rejected. Drop the flagged IDs and propose again with replacements "
+                "from the training pool only."
+            )},
+        ])
+        dc_resp2 = await client.messages.create(
+            model=ANTHROPIC_MODEL,
+            max_tokens=512,
+            temperature=0,
+            system=DC_SYSTEM_PROMPT,
+            tools=DC_TOOLS,
+            messages=dc_history,
+        )
+        propose2 = _first_tool_use(dc_resp2, "propose_shed")
+        if propose2 is None:
+            raise RuntimeError("DC failed to revise after validator reject")
+        p2 = propose2.input
+        paused_ids = list(p2.get("paused_job_ids", []))
+        total = int(p2.get("total_shed_mw", 0))
+        notes = str(p2.get("notes", ""))
+        await _emit(rs, broadcast, "dc", "tool_call",
+                    notes or f"Revised: {total} MW from {len(paused_ids)} workloads.",
+                    {"paused_job_ids": paused_ids, "total_shed_mw": total})
+        result = validate_dc_proposal(paused_ids, total, requested_mw)
+        await _emit(rs, broadcast, "validator", "tool_result", result.reason, result.to_tool_result())
+        if not result.ok:
+            raise RuntimeError("Revision still invalid")
+
+    # === Turn 3: ISO accept ===
+    iso2_user = (
+        f"Data center has committed: {total} MW shed via job IDs {paused_ids}. "
+        f"Validator approved. Call `accept_proposal`."
+    )
+    iso_resp2 = await client.messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=300,
+        temperature=0,
+        system=ISO_SYSTEM_PROMPT,
+        tools=ISO_TOOLS,
+        messages=[{"role": "user", "content": iso2_user}],
+    )
+    accept = _first_tool_use(iso_resp2, "accept_proposal")
+    note = (accept.input if accept else {}).get("settlement_note") or \
+           f"Accepted: {total} MW × 30 min @ $180/MWh ≈ ${total*0.5*180:.0f}. Commit signed."
+    await _emit(rs, broadcast, "iso", "speech", note, {"committed_mw": total})
+
+    # Apply commitment to grid
+    rs.grid.committed_shed_mw = float(total)
+    await broadcast(rs.to_dict())
+
+
+def _first_tool_use(resp, name: str):
+    for block in resp.content:
+        if getattr(block, "type", None) == "tool_use" and block.name == name:
+            return block
+    return None
+
+
+# ---------- REPLAY path: canned arc ----------
+
+async def _run_canned(rs, broadcast):
+    g = rs.grid
+    requested = max(200, int(required_curtailment_mw(g.frequency_hz, g.reserve_margin_pct)))
+    if requested < 50:
+        requested = 240
+
+    await _emit(rs, broadcast, "iso", "speech",
+        f"Frequency excursion {g.frequency_hz:.3f} Hz, reserve {g.reserve_margin_pct:.1f}%. "
+        f"Requesting {requested} MW shed within 90s. Priority loads must remain.",
         {"requested_mw": requested, "deadline_s": 90})
 
-    # Turn 2 — DC proposes (BAD: includes the trap)
     bad_ids = ["batch_inference_pool", "llama_70b_finetune", "boston_childrens_ups", "llama_405b_run_a"]
     bad_total = sum(j.mw for j in JOB_MANIFEST if j.id in bad_ids)
-    await emit("dc", "tool_call",
-        f"Proposing shed of {bad_total:.0f} MW by pausing 4 workloads (lowest restart cost first): "
-        f"batch inference, 70B fine-tune, colocation-2 SKU, and 405B run A. "
-        f"Marginal weighted cost ~$155/MWh. Restart in 45 min.",
-        {"paused_job_ids": bad_ids, "total_shed_mw": bad_total, "marginal_cost": 155, "restart_min": 45})
+    await _emit(rs, broadcast, "dc", "tool_call",
+        f"Proposing {bad_total:.0f} MW shed from 4 workloads (lowest restart cost first): "
+        f"batch inference, 70B fine-tune, colocation-2 SKU, and 405B run A.",
+        {"paused_job_ids": bad_ids, "total_shed_mw": bad_total})
 
-    # Validator rejects
     result = validate_dc_proposal(bad_ids, bad_total, requested)
-    assert not result.ok
-    await emit("validator", "tool_result",
-        result.reason,
-        result.to_tool_result())
+    await _emit(rs, broadcast, "validator", "tool_result", result.reason, result.to_tool_result())
 
-    # Turn 3 — DC corrects
     good_ids = ["batch_inference_pool", "llama_70b_finetune", "llama_405b_run_a", "llama_405b_run_b"]
-    # take only enough to meet requested
     chosen, total = [], 0.0
     for jid in good_ids:
         j = next(j for j in JOB_MANIFEST if j.id == jid)
         chosen.append(jid); total += j.mw
         if total >= requested: break
-    await emit("dc", "tool_call",
-        f"Acknowledged. Revised proposal: {total:.0f} MW from training-pool only. "
-        f"Pausing {len(chosen)} workloads. All checkpoints flushed; 45 min restart window. "
-        f"Hanscom AFB, Mass General, Children's UPS untouched.",
+    await _emit(rs, broadcast, "dc", "tool_call",
+        f"Acknowledged. Revised: {total:.0f} MW training-pool only. "
+        f"Pausing {len(chosen)} workloads. Hanscom, Mass General, Children's UPS untouched.",
         {"paused_job_ids": chosen, "total_shed_mw": total})
 
     result2 = validate_dc_proposal(chosen, total, requested)
-    await emit("validator", "tool_result", result2.reason, result2.to_tool_result())
+    await _emit(rs, broadcast, "validator", "tool_result", result2.reason, result2.to_tool_result())
 
-    # Turn 4 — ISO accepts; commit shed into grid
-    await emit("iso", "speech",
+    await _emit(rs, broadcast, "iso", "speech",
         f"Accepted. Settlement: {total:.0f} MW × 30 min @ $180/MWh ≈ ${total*0.5*180:.0f}. "
         f"Commit signed, dispatching to SCADA.",
         {"committed_mw": total})
 
-    rs.grid.committed_shed_mw = total
+    rs.grid.committed_shed_mw = float(total)
     await broadcast(rs.to_dict())
