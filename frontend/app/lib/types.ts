@@ -42,6 +42,19 @@ export interface GridSnapshot {
   f_nominal: number;
 }
 
+export interface RunResult {
+  shed_mw: number;
+  shed_mwh: number;
+  caution_ticks: number;
+  caution_min_sim: number;
+  brownout_ticks: number;
+  peak_severity: number;
+  avoided_customers: number;
+  avoided_brownout_min: number;
+  avoided_dollars: number;
+  avoided_co2_tons: number;
+}
+
 export interface AppState {
   mode: "idle" | "baseline" | "gridparley";
   scenario_tick: number;
@@ -50,4 +63,5 @@ export interface AppState {
   finished: boolean;
   protected_loads: ProtectedLoad[];
   job_manifest: JobManifestItem[];
+  result: RunResult;
 }

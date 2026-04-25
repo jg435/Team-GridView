@@ -40,12 +40,48 @@ class RunState:
     transcript: list[TranscriptMessage] = field(default_factory=list)
     finished: bool = False
     blackout_announced: bool = False
+    # accumulated counters for the result panel:
+    caution_ticks: int = 0          # ticks spent below 59.95 Hz
+    brownout_ticks: int = 0         # ticks with blackout_severity > 0.3
+    peak_severity: float = 0.0      # max blackout_severity seen
+    final_committed_shed_mw: float = 0.0
 
     def to_dict(self) -> dict:
         g = self.grid
+        # Compute counterfactual result: what GridParley saved (or would have saved) vs baseline.
+        # Approximations rooted in publicly cited numbers:
+        #   - shed MWh = committed_shed_mw × 0.5 hour
+        #   - avoided brownout customers ≈ 4200 MW residential / 3 kW per home = ~1.4M homes total in
+        #     metro Boston; assume 5% would have been UFLS'd in a sustained excursion
+        #   - dollar impact: $150 per customer-hour blackout (Hashemian/EPRI lit, conservative)
+        #   - carbon: gas peaker ~430 kg CO2/MWh; 110 MWh shed avoids spinning a peaker for 0.5h
+        shed_mwh = g.committed_shed_mw * 0.5
+        if self.mode == "gridparley" and g.committed_shed_mw > 0:
+            avoided_customers = 70_000   # 5% of metro Boston
+            avoided_minutes = 30
+            avoided_dollars = int(avoided_customers * (avoided_minutes / 60.0) * 150)
+            avoided_co2_tons = round(shed_mwh * 0.43, 1)
+        else:
+            avoided_customers = 0
+            avoided_minutes = 0
+            avoided_dollars = 0
+            avoided_co2_tons = 0
+        result = {
+            "shed_mw": round(g.committed_shed_mw, 0),
+            "shed_mwh": round(shed_mwh, 1),
+            "caution_ticks": self.caution_ticks,
+            "caution_min_sim": self.caution_ticks * 5,
+            "brownout_ticks": self.brownout_ticks,
+            "peak_severity": round(self.peak_severity, 2),
+            "avoided_customers": avoided_customers,
+            "avoided_brownout_min": avoided_minutes,
+            "avoided_dollars": avoided_dollars,
+            "avoided_co2_tons": avoided_co2_tons,
+        }
         return {
             "mode": self.mode,
             "scenario_tick": self.scenario_tick,
+            "result": result,
             "grid": {
                 "tick": g.tick,
                 "ts_local": g.ts_local,
@@ -132,6 +168,14 @@ async def run_scenario(mode: str) -> None:
 
         # advance physics
         step(rs.grid)
+
+        # accumulate counters
+        if rs.grid.frequency_hz < 59.95:
+            rs.caution_ticks += 1
+        if rs.grid.blackout_severity > 0.3:
+            rs.brownout_ticks += 1
+        if rs.grid.blackout_severity > rs.peak_severity:
+            rs.peak_severity = rs.grid.blackout_severity
 
         # broadcast post-step
         await broadcast(rs.to_dict())

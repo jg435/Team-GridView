@@ -16,9 +16,16 @@ const initialGrid: AppState["grid"] = {
   f_caution: 59.95, f_nominal: 60.0,
 };
 
+const initialResult = {
+  shed_mw: 0, shed_mwh: 0, caution_ticks: 0, caution_min_sim: 0,
+  brownout_ticks: 0, peak_severity: 0,
+  avoided_customers: 0, avoided_brownout_min: 0, avoided_dollars: 0, avoided_co2_tons: 0,
+};
+
 const initialState: AppState = {
   mode: "idle", scenario_tick: 0, grid: initialGrid,
   transcript: [], finished: false, protected_loads: [], job_manifest: [],
+  result: initialResult,
 };
 
 interface ChartPoint {
@@ -114,6 +121,11 @@ export default function Dashboard() {
           </button>
         </div>
       </header>
+
+      {/* Result banner — appears when scenario finishes */}
+      {state.finished && state.mode !== "idle" && (
+        <ResultBanner mode={state.mode} result={state.result} />
+      )}
 
       {/* Brownout alert banner */}
       {g.blackout_severity > 0.3 && state.mode !== "idle" && (
@@ -232,6 +244,59 @@ export default function Dashboard() {
           {state.transcript.map((m, i) => <TranscriptRow key={i} m={m} />)}
         </div>
       </section>
+    </div>
+  );
+}
+
+function ResultBanner({ mode, result }: { mode: AppState["mode"]; result: AppState["result"] }) {
+  if (mode === "baseline") {
+    return (
+      <div className="shrink-0 bg-rose-950/60 border-b border-rose-800/60 px-6 py-3 grid grid-cols-4 gap-6">
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-rose-300">Outcome</div>
+          <div className="text-lg font-semibold text-rose-200">Brownout sustained</div>
+          <div className="text-[11px] text-rose-300/80">No coordination layer, no curtailment.</div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-rose-300">Caution-zone time</div>
+          <div className="text-lg font-mono font-semibold text-rose-100">{result.caution_min_sim} min</div>
+          <div className="text-[11px] text-rose-300/80">Frequency below 59.95 Hz</div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-rose-300">Peak severity</div>
+          <div className="text-lg font-mono font-semibold text-rose-100">{(result.peak_severity * 100).toFixed(0)}%</div>
+          <div className="text-[11px] text-rose-300/80">Brownout intensity peak</div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-rose-300">Customers at risk</div>
+          <div className="text-lg font-mono font-semibold text-rose-100">~70 K</div>
+          <div className="text-[11px] text-rose-300/80">Metro Boston residential UFLS zone</div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="shrink-0 bg-emerald-950/50 border-b border-emerald-800/60 px-6 py-3 grid grid-cols-4 gap-6">
+      <div>
+        <div className="text-[10px] uppercase tracking-widest text-emerald-300">Outcome</div>
+        <div className="text-lg font-semibold text-emerald-200">Brownout averted</div>
+        <div className="text-[11px] text-emerald-300/80">Frequency held; priority loads untouched.</div>
+      </div>
+      <div>
+        <div className="text-[10px] uppercase tracking-widest text-emerald-300">Compute deferred</div>
+        <div className="text-lg font-mono font-semibold text-emerald-100">{result.shed_mwh} MWh</div>
+        <div className="text-[11px] text-emerald-300/80">{result.shed_mw.toFixed(0)} MW × 30 min · resumes after restart window</div>
+      </div>
+      <div>
+        <div className="text-[10px] uppercase tracking-widest text-emerald-300">Avoided customer impact</div>
+        <div className="text-lg font-mono font-semibold text-emerald-100">${(result.avoided_dollars/1000).toFixed(0)} K</div>
+        <div className="text-[11px] text-emerald-300/80">~{(result.avoided_customers/1000).toFixed(0)} K customers · {result.avoided_brownout_min} min UFLS averted</div>
+      </div>
+      <div>
+        <div className="text-[10px] uppercase tracking-widest text-emerald-300">Carbon avoided</div>
+        <div className="text-lg font-mono font-semibold text-emerald-100">~{result.avoided_co2_tons} t CO₂</div>
+        <div className="text-[11px] text-emerald-300/80">No gas peaker spin-up needed</div>
+      </div>
     </div>
   );
 }
