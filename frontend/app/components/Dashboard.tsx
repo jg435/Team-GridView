@@ -182,11 +182,28 @@ export default function Dashboard() {
       {/* Main grid */}
       <div className="flex-1 grid grid-cols-12 gap-px bg-zinc-800 min-h-0">
         {/* Chart */}
-        <section className="col-span-8 bg-zinc-950 p-4 flex flex-col min-h-0">
+        <section className="col-span-8 bg-zinc-950 p-4 flex flex-col min-h-0 relative">
           <div className="flex items-center justify-between mb-2">
             <div className="text-xs uppercase tracking-widest text-zinc-500">Grid State · Jun 20 2024 ISO-NE replay</div>
             <ChartLegend />
           </div>
+          {state.mode === "idle" && series.length === 0 && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+              <div className="bg-zinc-900/95 border border-zinc-800 rounded-lg p-5 max-w-md shadow-2xl pointer-events-auto">
+                <div className="text-xs uppercase tracking-widest text-amber-400 mb-2">Scenario · Jun 20, 2024</div>
+                <div className="text-base text-zinc-100 mb-3 leading-snug">
+                  Eastern US heat dome. ISO-NE peak demand. An 800 MW AI training fleet is running. A 400 MW generator trips offline.
+                </div>
+                <div className="text-sm text-zinc-400 mb-4 leading-snug">
+                  Watch the grid in two modes:
+                </div>
+                <ol className="text-sm text-zinc-300 space-y-2 list-decimal list-inside">
+                  <li><strong className="text-zinc-100">Run Baseline</strong> — no coordination. Watch frequency drop, brownout flash.</li>
+                  <li><strong className="text-emerald-400">Run with GridParley</strong> — two AIs negotiate, validator catches a bad bid, grid recovers.</li>
+                </ol>
+              </div>
+            </div>
+          )}
           <div className="flex-1 min-h-[260px]">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={series} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>

@@ -195,6 +195,21 @@ async def run_scenario(mode: str) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Pre-warm the OpenRouter connection so the first demo call doesn't cold-start.
+    if os.getenv("OPENROUTER_API_KEY"):
+        async def _warmup():
+            try:
+                from agents.orchestrator import _make_client, DEFAULT_MODEL
+                client = _make_client()
+                await client.chat.completions.create(
+                    model=DEFAULT_MODEL,
+                    max_tokens=4,
+                    temperature=0,
+                    messages=[{"role": "user", "content": "ok"}],
+                )
+            except Exception:
+                pass
+        asyncio.create_task(_warmup())
     yield
 
 
