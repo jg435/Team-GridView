@@ -8,18 +8,21 @@ The track brief said: *"You don't have to solve the whole grid — find one leve
 
 This project is example direction #1 in the track brief: *"Data center demand coordinator: model how large GPU clusters should throttle workloads based on real-time grid signals."*
 
-| | |
+## Submission summary (required fields)
+
+| Required item | Value |
 |---|---|
-| **Team** | team gridview |
+| **Team names** | team gridview · Jayesh Gupta (solo) |
 | **Track** | Electric Grid Optimization |
-| **Members** | Jayesh Gupta (solo) |
+| **What you built** | See [§ What you built](#what-you-built) below — short version: two Claude agents (ISO ↔ hyperscaler data-center fleet) negotiate emergency power curtailment, gated by a deterministic policy validator that protects priority loads (DoD, hospitals). |
+| **What datasets/APIs you used** | EIA-930 Hourly Electric Grid Monitor (real ISO-NE data) · EIA Open Data v2 API (live demand) · OpenRouter → `anthropic/claude-sonnet-4.5` · us-atlas TopoJSON. See [§ What datasets/APIs you used](#what-datasetsapis-you-used). |
+| **How to run it** | See [§ How to run it](#how-to-run-it). TL;DR: `cd backend && uvicorn app:app --port 8000` and `cd frontend && npm run dev`, open `localhost:3002`, click "Run with GridParley". |
 | **Site** | Boston |
 | **Repo** | <https://github.com/jg435/Team-GridView> |
-| **Demo** | `localhost:3002` after `npm run dev` (instructions below) |
 
 ---
 
-## What we built
+## What you built
 
 **The problem.** US data-center load grew 22% in 2025 and is on track to triple by 2030. ISO New England has the tightest reserve margins in the country and serves Hanscom AFB, multiple naval installations, and major Boston hospitals. In **December 2025 the FERC ordered PJM to create a *Non-Firm Contract Demand Transmission Service*** — a new tariff that lets AI co-located loads contract for *interruptible* service during grid emergencies. **It's a policy primitive with no operating layer.** When ISO-NE's control room needs 240 MW shed in 90 seconds, who do they call? How do they verify the data center didn't accidentally sell them a hospital's UPS load?
 
@@ -58,7 +61,7 @@ The safety layer isn't a one-shot stunt against a single planted trap. It catche
 
 ---
 
-## Datasets and APIs
+## What datasets/APIs you used
 
 We pulled from the track brief's suggested-source list:
 

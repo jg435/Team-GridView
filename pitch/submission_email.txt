@@ -1,49 +1,87 @@
---------------------------------------------------------------
+================================================================
 SCSP HACKATHON 2026 — ROUND 1 SUBMISSION EMAIL
-Send Sunday Apr 26, 2026 by 5:00 PM local
-To: hack@scsp.ai
---------------------------------------------------------------
+Send Sunday Apr 26, 2026 by 5:00 PM local time
+================================================================
 
+To: hack@scsp.ai
 Subject: SCSP Hackathon team gridview Electric Grid Optimization
 
-Body:
-------
+Body (copy from the line below):
+----------------------------------------------------------------
 Github link: https://github.com/jg435/Team-GridView
 
-Attached: README.md (also visible at the GitHub link above).
+Attached: README.md (also visible in the repo above).
 
-Team: team gridview
-Track: Electric Grid Optimization
-Members:
-- Jayesh Gupta
+Required README contents:
+- Team names: team gridview — Jayesh Gupta (solo)
+- Track: Electric Grid Optimization
+- What you built: GridParley — air traffic control for electrons.
+  Two Claude agents (ISO-NE control-room operator and hyperscaler
+  data-center fleet manager) negotiate workload curtailment in plain
+  English under FERC's December 2025 Non-Firm Contract Demand tariff.
+  A deterministic policy validator gates every agent tool call before
+  it touches the grid, enforcing ISO-NE Reliability Standard 7.4 —
+  Hanscom AFB, Mass General, and Boston Children's UPS load are
+  inviolable. A 50-trial red-team eval shows 100% catch rate and 0
+  false positives across perturbed prompts. This is example direction
+  #1 from the track brief.
+- What datasets/APIs you used: EIA-930 Hourly Electric Grid Monitor
+  (real ISO-NE data, Jun 2024 heat dome, peak 23,266 MW); EIA Open Data
+  v2 API (live current ISO-NE demand toggle); OpenRouter routed to
+  anthropic/claude-sonnet-4.5; us-atlas TopoJSON for the New England map.
+- How to run it: see README.md § "How to run it" — Python venv +
+  uv pip install, npm install --legacy-peer-deps, .env with
+  OPENROUTER_API_KEY (and optional EIA_API_KEY for live mode), run
+  uvicorn on :8000 and npm run dev on :3000/3002, click "Run with
+  GridParley".
 
-Brief: GridParley — air traffic control for electrons, between AI
-data centers and the ISO that has to keep the lights on. This is
-example direction #1 from the track brief ("Data center demand
-coordinator: model how large GPU clusters should throttle workloads
-based on real-time grid signals").
-
-Two Claude agents (ISO-NE control-room operator and hyperscaler
-data-center fleet) negotiate workload curtailment in plain English
-under FERC's December 2025 Non-Firm Contract Demand tariff. A
-deterministic policy validator catches every LLM mistake before it
-touches the grid model — Hanscom AFB, Mass General, and Boston
-Children's UPS load are inviolable per ISO-NE Reliability Std 7.4. A
-50-trial red-team eval shows 100% catch rate and 0 false positives
-across perturbed prompts. Replay mode runs against real EIA-930
-ISO-NE data from the Jun 2024 heat dome (peak 23,266 MW); Live mode
-pulls today's actual demand from the EIA v2 API.
-
-Demo, datasets/APIs, run instructions, and judging-rubric mapping are
-in the attached README.md.
+Demo, architecture, judging-rubric mapping, what's-real-vs-simulated
+disclosure, and the 50-trial eval artifact (eval_results.json) are all
+in the repo.
 
 Thanks,
-Jayesh
-team gridview · Boston
-------
+Jayesh — team gridview · Boston
+----------------------------------------------------------------
 
-ACTION ITEMS BEFORE SENDING:
-1. Attach /Users/jayesh/scsp/README.md to the email
-2. Confirm GitHub repo at https://github.com/jg435/Team-GridView is public
-3. Send by 5:00 PM Sun Apr 26 local time
-4. Bring a laptop with the repo cloned + .env populated for the in-person demo (5-7 PM)
+================================================================
+PRE-SEND CHECKLIST (do these in order, ~10 minutes)
+================================================================
+
+1. [ ] Verify the GitHub repo is PUBLIC:
+       Open https://github.com/jg435/Team-GridView in an incognito
+       window. If you can see the README without logging in, it's public.
+
+2. [ ] Verify there are no API keys committed:
+       Visit https://github.com/jg435/Team-GridView/blob/main/backend
+       Confirm there is NO .env file in the repo (only .env.example).
+       The git history should also be clean — search for "sk-or-v1"
+       in the GitHub search bar; should return zero results.
+
+3. [ ] Confirm latest commit is pushed:
+       Repo's main branch should show "Pre-demo polish from 2nd harsh
+       review" or later. If not: `cd /Users/jayesh/scsp && git push`.
+
+4. [ ] Open your email client (Gmail / Outlook / etc.).
+
+5. [ ] Compose new email:
+       To:       hack@scsp.ai
+       Subject:  SCSP Hackathon team gridview Electric Grid Optimization
+       Body:     paste from the body block above (between dashed lines)
+
+6. [ ] Attach README.md
+       File location: /Users/jayesh/scsp/README.md
+       (You can also drag-and-drop from Finder.)
+
+7. [ ] Send before 5:00 PM Sunday Apr 26 local (Boston) time.
+       Set a phone alarm for 4:50 PM.
+
+8. [ ] Forward yourself a copy as proof of timestamp.
+
+================================================================
+AFTER SENDING — venue / in-person demo (5 PM – 7 PM Sun)
+================================================================
+
+- Bring laptop with backend + frontend running (see pitch/DEMO.md §0)
+- Verbal script in pitch/DEMO.md §1 (5-minute timed)
+- Backup paths in pitch/DEMO.md §2 if anything breaks
+- Q&A coaching in pitch/DEMO.md §3 (10 likely questions)
