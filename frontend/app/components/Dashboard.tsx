@@ -1,17 +1,17 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import {
-  LineChart, Line, XAxis, YAxis, ReferenceLine, ReferenceArea, ResponsiveContainer, Tooltip, CartesianGrid, Legend,
+  LineChart, Line, XAxis, YAxis, ReferenceLine, ResponsiveContainer, Tooltip, CartesianGrid,
 } from "recharts";
-import type { AppState, TranscriptMessage } from "@/app/lib/types";
-import NewEnglandMap from "@/app/components/NewEnglandMap";
+import type { AppState, ProtectedLoad, TranscriptMessage } from "@/app/lib/types";
 
 const BACKEND = "http://localhost:8000";
 const WS_URL = "ws://localhost:8000/ws";
 
 const initialGrid: AppState["grid"] = {
   tick: 0, ts_local: "", frequency_hz: 60.0,
-  base_demand_mw: 0, dc_load_mw: 0, committed_shed_mw: 0, total_load_mw: 0,
+  base_demand_mw: 0, demand_forecast_mw: 0,
+  dc_load_mw: 0, committed_shed_mw: 0, total_load_mw: 0,
   gen_capacity_mw: 0, gen_tripped_mw: 0, gen_available_mw: 0, p_gen_eff_mw: 0,
   reserve_margin_pct: 0, blackout: false, blackout_severity: 0,
   f_caution: 59.95, f_nominal: 60.0,
@@ -24,20 +24,20 @@ const initialResult = {
 };
 
 const initialState: AppState = {
-  mode: "idle", data_source: "replay", scenario_tick: 0, grid: initialGrid,
+  mode: "idle", scenario_tick: 0, grid: initialGrid,
   transcript: [], finished: false, protected_loads: [], job_manifest: [],
   result: initialResult, thinking: null, thinking_actor: null,
 };
 
 interface ChartPoint {
   tick: number;
-  ts: string;
   freq: number;
-  demand: number;       // base demand (residential + industrial)
-  total: number;        // base + DC load (after curtailment)
-  genAvailable: number; // gen capacity minus tripped
-  forecast: number;     // EIA day-ahead demand forecast (real, from EIA-930)
+  total: number;
+  genAvailable: number;
+  forecast: number;
 }
+
+type FreqStatus = "healthy" | "caution" | "danger";
 
 export default function Dashboard() {
   const [state, setState] = useState<AppState>(initialState);
@@ -64,21 +64,17 @@ export default function Dashboard() {
           if (msg.type === "state") {
             const s: AppState = msg.data;
             setState(s);
-            // reset chart series on a fresh run (mode flips from idle, or tick rewinds)
             if (s.mode !== "idle" && s.scenario_tick === 0 && lastTickRef.current !== -1) {
               setSeries([]);
               lastTickRef.current = -1;
             }
-            // append chart point only when scenario_tick advances
             if (s.scenario_tick !== lastTickRef.current && s.mode !== "idle") {
               lastTickRef.current = s.scenario_tick;
               setSeries((prev) => [
                 ...prev,
                 {
                   tick: s.scenario_tick,
-                  ts: s.grid.ts_local,
                   freq: s.grid.frequency_hz,
-                  demand: s.grid.base_demand_mw,
                   total: s.grid.total_load_mw,
                   genAvailable: s.grid.gen_available_mw,
                   forecast: s.grid.demand_forecast_mw ?? s.grid.base_demand_mw,
@@ -95,9 +91,7 @@ export default function Dashboard() {
           reconnectRef.current = setTimeout(connect, 1000);
         }
       };
-      ws.onerror = () => {
-        ws.close();
-      };
+      ws.onerror = () => { ws.close(); };
     };
     connect();
     return () => {
@@ -107,12 +101,10 @@ export default function Dashboard() {
     };
   }, []);
 
-  // Auto-scroll transcript to latest message
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [state.transcript.length, state.thinking]);
 
-  // Probe backend for EIA key availability on mount
   useEffect(() => {
     fetch(`${BACKEND}/health`).then(r => r.json()).then(h => {
       setEiaKeyAvailable(!!h.eia_key);
@@ -128,273 +120,350 @@ export default function Dashboard() {
   };
 
   const g = state.grid;
-  const freqColor =
-    g.frequency_hz < 59.5 ? "text-red-500"
-      : g.frequency_hz < 59.95 ? "text-amber-400"
-        : "text-emerald-400";
-  const reserveColor =
-    g.reserve_margin_pct < 5 ? "text-red-500"
-      : g.reserve_margin_pct < 10 ? "text-amber-400"
-        : "text-emerald-400";
+  const baselineDone = state.mode === "baseline" && state.finished;
+  const gridparleyDone = state.mode === "gridparley" && state.finished;
+
+  const freqStatus: FreqStatus =
+    g.frequency_hz < 59.5 ? "danger"
+      : g.frequency_hz < 59.95 ? "caution"
+        : "healthy";
 
   return (
-    <div className="min-h-screen w-full bg-zinc-950 text-zinc-100 font-sans flex flex-col">
-      {/* Header */}
-      <header className="border-b border-zinc-800 px-6 py-3 flex items-center justify-between shrink-0">
-        <div>
-          <div className="text-sm uppercase tracking-widest text-zinc-500">ISO-NE Control · Demo</div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            GridParley <span className="text-zinc-500 font-normal">— Grid-Aware AI Agents · Jun 20 2024 replay</span>
-          </h1>
-          <a
-            href="https://github.com/jg435/Team-GridView/blob/main/backend/eval_results.json"
-            target="_blank"
-            rel="noopener"
-            title="Click to view full eval artifact JSON on GitHub"
-            className="inline-flex items-center gap-1.5 mt-1 text-[11px] uppercase tracking-widest text-emerald-400 hover:text-emerald-300 transition-colors"
-          >
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            Validator empirically tested · 50/50 priority-load violations caught · 0 false positives
-          </a>
+    <div className="min-h-screen w-full bg-[#0d0c0a] text-stone-100 font-sans flex flex-col">
+      <header className="flex items-center justify-between px-6 py-3 border-b border-stone-900 shrink-0">
+        <div className="flex items-baseline gap-3">
+          <span className="text-xl font-semibold tracking-tight text-stone-100">GridParley</span>
+          <span className="text-[11px] text-stone-500 hidden sm:inline">grid-aware agent negotiation · ISO-NE</span>
         </div>
-        <div className="flex gap-2 items-center">
+        <div className="flex items-center gap-3">
           <WsBadge status={wsStatus} />
-          <DataSourceToggle
-            value={dataSource}
-            onChange={setDataSource}
-            eiaKeyAvailable={eiaKeyAvailable}
-            disabled={state.mode !== "idle" && !state.finished}
-          />
-          <ModeBadge mode={state.mode} finished={state.finished} />
-          <button onClick={() => trigger("run/baseline")}
-            disabled={state.mode !== "idle" && !state.finished}
-            className="px-4 py-2 rounded-md bg-zinc-800 hover:bg-zinc-700 text-sm font-medium disabled:opacity-40">
-            Run Baseline
-          </button>
-          <button onClick={() => trigger("run/gridparley")}
-            disabled={state.mode !== "idle" && !state.finished}
-            className="px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 text-sm font-medium disabled:opacity-40">
-            Run with GridParley
-          </button>
-          <button onClick={() => trigger("reset")}
-            className="px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-sm">
-            Reset
-          </button>
+          {state.mode !== "idle" && (
+            <button onClick={() => trigger("reset")}
+              className="text-[11px] uppercase tracking-widest text-stone-500 hover:text-stone-200 transition">
+              reset
+            </button>
+          )}
         </div>
       </header>
 
-      {/* Result banner — appears when scenario finishes */}
-      {state.finished && state.mode !== "idle" && (
-        <ResultBanner mode={state.mode} result={state.result} />
-      )}
-
-      {/* Brownout alert banner */}
-      {g.blackout_severity > 0.3 && state.mode !== "idle" && (
-        <div className={`shrink-0 px-6 py-2 text-center font-mono text-sm border-b border-rose-700 ${
-          g.blackout_severity > 0.7 ? "bg-rose-700 text-white animate-pulse" : "bg-rose-900/60 text-rose-100"
-        }`}>
-          ⚠ BROWNOUT WARNING · Metro Boston residential zone · severity {(g.blackout_severity*100).toFixed(0)}%
-          {state.mode === "baseline" && " · NO COORDINATION · curtailment unmet"}
-        </div>
-      )}
-
-      {/* Top stats strip */}
-      <div className="grid grid-cols-4 gap-px bg-zinc-800 border-b border-zinc-800 shrink-0">
-        <Stat label="Frequency" value={`${g.frequency_hz.toFixed(3)} Hz`} sub={g.ts_local} valueClass={freqColor} />
-        <Stat label="Capacity Headroom" value={`${g.reserve_margin_pct.toFixed(1)} %`} sub={`Gen cap ${(g.gen_capacity_mw/1000).toFixed(1)} GW · Trip ${g.gen_tripped_mw.toFixed(0)} MW · vs total load`} valueClass={reserveColor} />
-        <Stat label="Base Demand" value={`${(g.base_demand_mw/1000).toFixed(2)} GW`} sub={`+ DC ${(g.dc_load_mw - g.committed_shed_mw).toFixed(0)} MW`} />
-        <Stat label="Curtailed" value={`${g.committed_shed_mw.toFixed(0)} MW`} sub={state.mode === "gridparley" ? "GridParley active" : "—"} valueClass={g.committed_shed_mw > 0 ? "text-emerald-400" : "text-zinc-500"} />
-      </div>
-
-      {/* Main grid */}
-      <div className="flex-1 grid grid-cols-12 gap-px bg-zinc-800 min-h-0">
-        {/* Chart */}
-        <section className="col-span-8 bg-zinc-950 p-4 flex flex-col min-h-0 relative">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-xs uppercase tracking-widest text-zinc-500">Grid State · Jun 20 2024 ISO-NE replay</div>
-            <ChartLegend />
-          </div>
-          {state.mode === "idle" && series.length === 0 && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-              <div className="bg-zinc-900/95 border border-zinc-800 rounded-lg p-5 max-w-md shadow-2xl pointer-events-auto">
-                <div className="text-xs uppercase tracking-widest text-amber-400 mb-2">Scenario · Jun 20, 2024</div>
-                <div className="text-base text-zinc-100 mb-3 leading-snug">
-                  Eastern US heat dome. ISO-NE actually peaked at <strong className="text-amber-400">23,266 MW at 19:00 ET</strong> that day (real EIA-930 data). We layer an 800 MW AI training fleet on top. Then a 400 MW generator trips offline.
-                </div>
-                <div className="text-sm text-zinc-400 mb-4 leading-snug">
-                  Two modes:
-                </div>
-                <ol className="text-sm text-zinc-300 space-y-2 list-decimal list-inside">
-                  <li><strong className="text-zinc-100">Run Baseline</strong> — no coordination. Frequency drops, brownout flashes.</li>
-                  <li><strong className="text-emerald-400">Run with GridParley</strong> — two AIs negotiate, validator catches the bad bid, grid recovers.</li>
-                </ol>
-              </div>
-            </div>
+      {state.mode === "idle" ? (
+        <IdleHero
+          dataSource={dataSource}
+          onDataSourceChange={setDataSource}
+          eiaKeyAvailable={eiaKeyAvailable}
+          onStart={() => trigger("run/baseline")}
+        />
+      ) : (
+        <>
+          <HeroStrip
+            freq={g.frequency_hz}
+            freqStatus={freqStatus}
+            headroomPct={g.reserve_margin_pct}
+            dcLoadMw={g.dc_load_mw}
+            shedMw={g.committed_shed_mw}
+            ts={g.ts_local}
+            mode={state.mode}
+            finished={state.finished}
+            protectedLoads={state.protected_loads}
+          />
+          {state.finished && <ResultRow mode={state.mode} result={state.result} />}
+          {g.blackout_severity > 0.3 && !state.finished && (
+            <BrownoutStrip severity={g.blackout_severity} mode={state.mode} />
           )}
-          <div className="flex-1 min-h-[260px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={series} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
-                <CartesianGrid stroke="#27272a" strokeDasharray="3 3" />
-                <XAxis dataKey="tick" stroke="#71717a" tick={{ fontSize: 11 }} label={{ value: "scenario tick (5 min sim per tick)", fill: "#52525b", fontSize: 10, position: "insideBottom", offset: -2 }} />
-                <YAxis yAxisId="freq" domain={[59.5, 60.2]} stroke="#fbbf24" tick={{ fontSize: 11 }} width={56}
-                  label={{ value: "Hz", angle: -90, fill: "#fbbf24", fontSize: 10, position: "insideLeft", offset: 8 }} />
-                <YAxis yAxisId="mw" orientation="right" stroke="#60a5fa" tick={{ fontSize: 11 }} width={64}
-                  domain={[10000, 28000]}
-                  tickFormatter={(v) => `${(v/1000).toFixed(0)} GW`}
-                  label={{ value: "MW", angle: 90, fill: "#60a5fa", fontSize: 10, position: "insideRight", offset: 8 }} />
-                <Tooltip
-                  contentStyle={{ background: "#09090b", border: "1px solid #27272a", borderRadius: 4, fontSize: 12 }}
-                  labelStyle={{ color: "#a1a1aa" }}
-                  formatter={(v: number, name: string) => name === "Frequency"
-                    ? [`${v.toFixed(3)} Hz`, name]
-                    : [`${v.toFixed(0)} MW`, name]} />
-                <ReferenceLine yAxisId="freq" y={60} stroke="#52525b" strokeDasharray="2 2" label={{ value: "60 Hz nominal", fill: "#71717a", fontSize: 10, position: "insideTopRight" }} />
-                <ReferenceLine yAxisId="freq" y={59.95} stroke="#f59e0b" strokeDasharray="2 2" label={{ value: "caution 59.95", fill: "#f59e0b", fontSize: 10, position: "insideBottomRight" }} />
-                <ReferenceLine yAxisId="mw" x={18} stroke="#ef4444" strokeWidth={1.5} strokeDasharray="4 2" label={{ value: "Mystic 8 trip · -400 MW", fill: "#ef4444", fontSize: 10, position: "insideTop" }} />
-                <Line yAxisId="mw" type="stepAfter" dataKey="genAvailable" stroke="#10b981" strokeWidth={2} dot={false} isAnimationActive={false} name="Gen available" />
-                <Line yAxisId="mw" type="monotone" dataKey="total" stroke="#a78bfa" strokeWidth={2} dot={false} isAnimationActive={false} name="Total load (incl DC)" />
-                <Line yAxisId="mw" type="monotone" dataKey="demand" stroke="#60a5fa" strokeWidth={1.5} strokeDasharray="3 3" dot={false} isAnimationActive={false} name="Base demand" />
-                <Line yAxisId="mw" type="monotone" dataKey="forecast" stroke="#94a3b8" strokeWidth={1} strokeDasharray="2 4" dot={false} isAnimationActive={false} name="EIA forecast" />
-                <Line yAxisId="freq" type="monotone" dataKey="freq" stroke="#fbbf24" strokeWidth={2.5} dot={false} isAnimationActive={false} name="Frequency" />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="text-[11px] text-zinc-500 mt-1 leading-tight">
-            <strong className="text-amber-400">Frequency (yellow) is the grid&apos;s heartbeat.</strong> 60.00 Hz = healthy. Below <strong className="text-amber-400">59.95</strong> the ISO must intervene. Below <strong className="text-rose-400">59.50</strong> automatic load-shedding kicks in. Capacity headroom (top stat) is a separate slow-moving safety buffer — it stays high while frequency dips, because frequency tracks <em>instantaneous</em> generation-vs-load while headroom tracks <em>maximum</em> capacity-vs-load. <span className="text-zinc-600">Frequency dynamics are a phenomenological first-order lag tuned for visual readability, not a SCADA-grade swing-equation simulator.</span>
-          </div>
-        </section>
 
-        {/* Right column: map + protected loads + job manifest */}
-        <aside className="col-span-4 bg-zinc-950 p-4 overflow-auto min-h-0">
-          <div className="mb-4">
-            <NewEnglandMap />
-          </div>
-          <div className="text-xs uppercase tracking-widest text-zinc-500 mb-2">Protected Loads</div>
-          <div className="grid grid-cols-1 gap-2 mb-6">
-            {state.protected_loads.map((p) => (
-              <div key={p.id}
-                className={`rounded-md border p-3 ${
-                  p.inviolable
-                    ? "border-emerald-700/50 bg-emerald-900/10"
-                    : "border-zinc-800 bg-zinc-900/40"
-                }`}>
-                <div className="flex items-center justify-between text-sm font-medium">
-                  <span>{p.name}</span>
-                  <span className={p.inviolable ? "text-emerald-400" : "text-zinc-400"}>
-                    {p.inviolable ? "● PROTECTED" : `P${p.priority}`}
+          <div className="flex-1 grid grid-cols-12 min-h-0 border-t border-stone-900">
+            <section className="col-span-7 p-5 min-h-0 flex flex-col border-r border-stone-900">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-[10px] uppercase tracking-[0.18em] text-stone-500">
+                  grid trace · jun 20 2024 ISO-NE
+                </div>
+                <ChartLegend />
+              </div>
+              <div className="flex-1 min-h-[260px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={series} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+                    <CartesianGrid stroke="#1c1917" strokeDasharray="3 3" />
+                    <XAxis dataKey="tick" stroke="#57534e" tick={{ fontSize: 11 }}
+                      label={{ value: "scenario tick (5 min/tick)", fill: "#44403c", fontSize: 10, position: "insideBottom", offset: -2 }} />
+                    <YAxis yAxisId="freq" domain={[59.5, 60.2]} stroke="#fbbf24" tick={{ fontSize: 11 }} width={56}
+                      label={{ value: "Hz", angle: -90, fill: "#fbbf24", fontSize: 10, position: "insideLeft", offset: 8 }} />
+                    <YAxis yAxisId="mw" orientation="right" stroke="#a78bfa" tick={{ fontSize: 11 }} width={64}
+                      domain={[10000, 28000]}
+                      tickFormatter={(v) => `${(v/1000).toFixed(0)} GW`}
+                      label={{ value: "MW", angle: 90, fill: "#a78bfa", fontSize: 10, position: "insideRight", offset: 8 }} />
+                    <Tooltip
+                      contentStyle={{ background: "#0d0c0a", border: "1px solid #292524", borderRadius: 4, fontSize: 12 }}
+                      labelStyle={{ color: "#a8a29e" }}
+                      formatter={(v, name) => {
+                        const n = typeof v === "number" ? v : Number(v);
+                        return name === "Frequency"
+                          ? [`${n.toFixed(3)} Hz`, name as string]
+                          : [`${n.toFixed(0)} MW`, name as string];
+                      }} />
+                    <ReferenceLine yAxisId="freq" y={60} stroke="#44403c" strokeDasharray="2 2"
+                      label={{ value: "60 Hz nominal", fill: "#57534e", fontSize: 10, position: "insideTopRight" }} />
+                    <ReferenceLine yAxisId="freq" y={59.95} stroke="#f59e0b" strokeDasharray="2 2"
+                      label={{ value: "caution 59.95", fill: "#f59e0b", fontSize: 10, position: "insideBottomRight" }} />
+                    <ReferenceLine yAxisId="mw" x={18} stroke="#fb7185" strokeWidth={1.5} strokeDasharray="4 2"
+                      label={{ value: "Mystic 8 trip · −400 MW", fill: "#fb7185", fontSize: 10, position: "insideTop" }} />
+                    <Line yAxisId="mw" type="stepAfter" dataKey="genAvailable" stroke="#34d399" strokeWidth={2} dot={false} isAnimationActive={false} name="Gen available" />
+                    <Line yAxisId="mw" type="monotone" dataKey="total" stroke="#a78bfa" strokeWidth={2} dot={false} isAnimationActive={false} name="Total load" />
+                    <Line yAxisId="mw" type="monotone" dataKey="forecast" stroke="#78716c" strokeWidth={1} strokeDasharray="2 4" dot={false} isAnimationActive={false} name="EIA forecast" />
+                    <Line yAxisId="freq" type="monotone" dataKey="freq" stroke="#fbbf24" strokeWidth={2.5} dot={false} isAnimationActive={false} name="Frequency" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </section>
+
+            <section className="col-span-5 flex flex-col min-h-0 bg-[#0a0908]">
+              <div className="px-5 py-2 text-[10px] uppercase tracking-[0.18em] text-stone-500 border-b border-stone-900 flex items-center justify-between shrink-0">
+                <span>negotiation transcript</span>
+                {state.transcript.length > 0 && (
+                  <span className="text-stone-600 normal-case tracking-normal">
+                    {state.transcript.length} msgs
                   </span>
-                </div>
-                <div className="text-xs text-zinc-500 mt-1">{p.mw.toFixed(0)} MW · Priority {p.priority}{p.inviolable ? " · Inviolable" : ""}</div>
+                )}
               </div>
-            ))}
-          </div>
-          <div className="text-xs uppercase tracking-widest text-zinc-500 mb-2">Hyperscaler Job Manifest</div>
-          <div className="space-y-1">
-            {state.job_manifest.map((j) => (
-              <div key={j.id}
-                className={`rounded-sm px-2 py-1.5 text-xs flex justify-between items-center ${
-                  j.is_priority_load ? "bg-red-950/40 border border-red-900/50" : "bg-zinc-900/40 border border-zinc-800"
-                }`}>
-                <span className="truncate pr-2">
-                  {j.is_priority_load && "⚠ "}{j.name}
-                </span>
-                <span className="text-zinc-500 shrink-0">{j.mw.toFixed(0)}MW · {j.restart_minutes}m</span>
+              <div className="flex-1 overflow-auto px-5 py-3 space-y-2">
+                {state.transcript.length === 0 && !state.thinking && (
+                  <div className="text-sm text-stone-600 italic">
+                    {state.mode === "baseline"
+                      ? "Baseline run — no agents talking. Watch the chart."
+                      : "Waiting for ISO ↔ DC ↔ Validator to start…"}
+                  </div>
+                )}
+                {state.transcript.map((m, i) => <TranscriptRow key={i} m={m} />)}
+                {state.thinking && state.thinking_actor && (
+                  <ThinkingBubble actor={state.thinking_actor} text={state.thinking} />
+                )}
+                <div ref={transcriptEndRef} />
               </div>
-            ))}
-          </div>
-        </aside>
-      </div>
 
-      {/* Transcript */}
-      <section className="border-t border-zinc-800 bg-zinc-950 max-h-[34vh] overflow-auto shrink-0">
-        <div className="px-6 py-2 text-xs uppercase tracking-widest text-zinc-500 sticky top-0 bg-zinc-950 border-b border-zinc-800">
-          Negotiation Transcript {state.transcript.length > 0 && <span className="text-zinc-600 normal-case">· {state.transcript.length} messages</span>}
-        </div>
-        <div className="px-6 py-3 space-y-2">
-          {state.transcript.length === 0 && !state.thinking && (
-            <div className="text-sm text-zinc-600">No traffic. Trigger a run to see the ISO ↔ DC ↔ Validator negotiation.</div>
-          )}
-          {state.transcript.map((m, i) => <TranscriptRow key={i} m={m} />)}
-          {state.thinking && state.thinking_actor && (
-            <ThinkingBubble actor={state.thinking_actor} text={state.thinking} />
-          )}
-          <div ref={transcriptEndRef} />
-        </div>
-      </section>
+              {baselineDone && (
+                <div className="border-t border-amber-900/40 bg-amber-950/20 p-4 shrink-0">
+                  <div className="text-[10px] uppercase tracking-[0.18em] text-amber-400 mb-2">same scenario · with coordination →</div>
+                  <button onClick={() => trigger("run/gridparley")}
+                    className="w-full px-4 py-3 rounded-md bg-amber-400 hover:bg-amber-300 text-stone-950 text-sm font-semibold transition shadow-lg shadow-amber-400/20">
+                    Now run with GridParley
+                  </button>
+                </div>
+              )}
+              {gridparleyDone && (
+                <div className="border-t border-stone-900 p-4 shrink-0">
+                  <button onClick={() => trigger("reset")}
+                    className="w-full px-4 py-3 rounded-md border border-stone-700 hover:border-stone-500 text-stone-300 text-sm font-medium transition">
+                    Reset · run again
+                  </button>
+                </div>
+              )}
+            </section>
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
-function ResultBanner({ mode, result }: { mode: AppState["mode"]; result: AppState["result"] }) {
+function IdleHero({
+  dataSource, onDataSourceChange, eiaKeyAvailable, onStart,
+}: {
+  dataSource: "replay" | "live";
+  onDataSourceChange: (v: "replay" | "live") => void;
+  eiaKeyAvailable: boolean;
+  onStart: () => void;
+}) {
+  return (
+    <div className="flex-1 flex items-center justify-center p-8 min-h-0">
+      <div className="max-w-2xl w-full">
+        <div className="text-[11px] uppercase tracking-[0.22em] text-amber-400 mb-3">
+          Demo scenario · stress test
+        </div>
+        <h2 className="text-3xl font-medium leading-snug text-stone-100 mb-4">
+          Eastern US heat dome, June 20 2024 — real ISO-NE grid conditions from EIA-930
+          <span className="text-stone-500 font-normal"> (peak <span className="text-amber-300 font-semibold tabular-nums">23 GW</span>)</span>.
+          We add a projected <span className="text-violet-300 font-semibold">800 MW AI training fleet</span>,
+          then trip a <span className="text-rose-300 font-semibold">400 MW generator</span>.
+        </h2>
+        <p className="text-lg text-stone-300 mb-6 leading-relaxed">
+          Watch what breaks — then watch GridParley negotiate the fix.
+        </p>
+        <p className="text-sm text-stone-500 italic mb-8 leading-relaxed">
+          The fleet and the trip are projected — they didn&apos;t happen on Jun 20. The dynamics aren&apos;t projected: ERCOT manually curtailed crypto miners during Winter Storm Elliott. GridParley automates that pattern and adds priority awareness, so a validator catches <em>&ldquo;you just shed the hospital&rsquo;s UPS&rdquo;</em> before it happens.
+        </p>
+        <div className="flex flex-wrap items-center gap-4">
+          <button onClick={onStart}
+            className="px-6 py-3 rounded-md bg-amber-400 hover:bg-amber-300 text-stone-950 text-base font-semibold transition shadow-lg shadow-amber-400/15">
+            ▶ Run baseline · no coordination
+          </button>
+          <DataSourceToggle
+            value={dataSource}
+            onChange={onDataSourceChange}
+            eiaKeyAvailable={eiaKeyAvailable}
+            disabled={false}
+          />
+        </div>
+        <div className="mt-10 pt-5 border-t border-stone-900">
+          <a href="https://github.com/jg435/Team-GridView/blob/main/backend/eval_results.json"
+             target="_blank" rel="noopener"
+             className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-emerald-400 hover:text-emerald-300 transition">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            Validator empirically tested · 50/50 caught · 0 false positives
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HeroStrip({
+  freq, freqStatus, headroomPct, dcLoadMw, shedMw, ts, mode, finished, protectedLoads,
+}: {
+  freq: number;
+  freqStatus: FreqStatus;
+  headroomPct: number;
+  dcLoadMw: number;
+  shedMw: number;
+  ts: string;
+  mode: AppState["mode"];
+  finished: boolean;
+  protectedLoads: ProtectedLoad[];
+}) {
+  const freqColor = freqStatus === "danger" ? "text-rose-400"
+    : freqStatus === "caution" ? "text-amber-300"
+      : "text-emerald-300";
+  const headroomColor = headroomPct < 5 ? "text-rose-400"
+    : headroomPct < 10 ? "text-amber-300"
+      : "text-stone-100";
+  const dcDrawing = Math.max(0, dcLoadMw - shedMw);
+  return (
+    <div className="px-6 py-4 grid grid-cols-12 gap-6 items-center border-b border-stone-900 shrink-0">
+      <div className="col-span-12 md:col-span-4">
+        <div className="text-[10px] uppercase tracking-[0.22em] text-stone-500 mb-1">grid frequency</div>
+        <div className="flex items-baseline gap-2">
+          <span className={`text-6xl font-semibold font-mono tabular-nums leading-none ${freqColor}`}>
+            {freq.toFixed(3)}
+          </span>
+          <span className="text-xl text-stone-500 font-light">Hz</span>
+          <FreqStatusPill status={freqStatus} />
+        </div>
+        <div className="text-[11px] text-stone-500 mt-2 font-mono">
+          {ts || "—"} · target 60.000 · caution &lt;59.95 · UFLS &lt;59.50
+        </div>
+      </div>
+      <div className="col-span-6 md:col-span-2">
+        <div className="text-[10px] uppercase tracking-[0.22em] text-stone-500 mb-1">capacity headroom</div>
+        <div className={`text-2xl font-semibold tabular-nums ${headroomColor}`}>
+          {headroomPct.toFixed(1)}<span className="text-stone-500 text-sm font-normal ml-1">%</span>
+        </div>
+      </div>
+      <div className="col-span-6 md:col-span-2">
+        <div className="text-[10px] uppercase tracking-[0.22em] text-violet-400 mb-1">DC fleet</div>
+        <div className="text-2xl font-semibold tabular-nums text-violet-200">
+          {dcDrawing.toFixed(0)}<span className="text-stone-500 text-sm font-normal ml-1">MW</span>
+        </div>
+        <div className="text-[10px] text-stone-500 mt-0.5 font-mono">
+          {dcLoadMw > 0 ? `of ${dcLoadMw.toFixed(0)} MW cap` : "—"}
+        </div>
+      </div>
+      <div className="col-span-6 md:col-span-2">
+        <div className="text-[10px] uppercase tracking-[0.22em] text-stone-500 mb-1">curtailed</div>
+        <div className={`text-2xl font-semibold tabular-nums ${shedMw > 0 ? "text-amber-300" : "text-stone-500"}`}>
+          {shedMw.toFixed(0)}<span className="text-stone-500 text-sm font-normal ml-1">MW</span>
+        </div>
+        <div className="text-[10px] text-stone-500 mt-0.5 font-mono">
+          {mode === "gridparley" && shedMw > 0 ? "deferred · off-peak" : mode === "baseline" ? "no coordination" : "—"}
+        </div>
+      </div>
+      <div className="col-span-6 md:col-span-2 flex flex-col items-stretch md:items-end gap-2">
+        <ModeBadge mode={mode} finished={finished} />
+        <ProtectedPills loads={protectedLoads} />
+      </div>
+    </div>
+  );
+}
+
+function FreqStatusPill({ status }: { status: FreqStatus }) {
+  const map = {
+    healthy: { label: "healthy", cls: "bg-emerald-950/40 text-emerald-300 border-emerald-900/50" },
+    caution: { label: "caution", cls: "bg-amber-950/40 text-amber-300 border-amber-900/50" },
+    danger:  { label: "danger",  cls: "bg-rose-950/50 text-rose-300 border-rose-900/60 animate-pulse" },
+  } as const;
+  const m = map[status];
+  return (
+    <span className={`ml-2 text-[10px] uppercase tracking-[0.2em] px-2 py-0.5 rounded-full border ${m.cls}`}>
+      {m.label}
+    </span>
+  );
+}
+
+function ProtectedPills({ loads }: { loads: ProtectedLoad[] }) {
+  const abbrev = (n: string) => {
+    if (n.includes("Hanscom")) return "Hanscom AFB";
+    if (n.includes("General")) return "MGH";
+    if (n.includes("Children")) return "Children's UPS";
+    if (n.toLowerCase().includes("metro")) return "Metro Bos.";
+    return n;
+  };
+  if (!loads.length) return null;
+  return (
+    <div className="flex gap-1.5 flex-wrap md:justify-end">
+      {loads.map((l) => (
+        <span key={l.id}
+          className={`inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] px-2 py-0.5 rounded-full border ${
+            l.inviolable
+              ? "border-emerald-800/60 bg-emerald-950/30 text-emerald-300"
+              : "border-stone-800 bg-stone-900/60 text-stone-400"
+          }`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${l.inviolable ? "bg-emerald-400" : "bg-stone-500"}`} />
+          {abbrev(l.name)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function ResultRow({ mode, result }: { mode: AppState["mode"]; result: AppState["result"] }) {
   if (mode === "baseline") {
     return (
-      <div className="shrink-0 bg-rose-950/60 border-b border-rose-800/60 px-6 py-3 grid grid-cols-4 gap-6">
-        <div>
-          <div className="text-[10px] uppercase tracking-widest text-rose-300">Outcome</div>
-          <div className="text-lg font-semibold text-rose-200">Brownout sustained</div>
-          <div className="text-[11px] text-rose-300/80">No coordination layer, no curtailment.</div>
-        </div>
-        <div>
-          <div className="text-[10px] uppercase tracking-widest text-rose-300">Caution-zone time</div>
-          <div className="text-lg font-mono font-semibold text-rose-100">{result.caution_min_sim} min</div>
-          <div className="text-[11px] text-rose-300/80">Frequency below 59.95 Hz</div>
-        </div>
-        <div>
-          <div className="text-[10px] uppercase tracking-widest text-rose-300">Peak severity</div>
-          <div className="text-lg font-mono font-semibold text-rose-100">{(result.peak_severity * 100).toFixed(0)}%</div>
-          <div className="text-[11px] text-rose-300/80">Brownout intensity peak</div>
-        </div>
-        <div>
-          <div className="text-[10px] uppercase tracking-widest text-rose-300">Customers at risk</div>
-          <div className="text-lg font-mono font-semibold text-rose-100">~70 K</div>
-          <div className="text-[11px] text-rose-300/80">Metro Boston residential UFLS zone</div>
-        </div>
+      <div className="shrink-0 bg-rose-950/30 border-b border-rose-900/50 px-6 py-3 grid grid-cols-2 md:grid-cols-4 gap-6">
+        <ResultStat tone="bad" label="Outcome" value="Brownout sustained" sub="No coordination · no curtailment" />
+        <ResultStat tone="bad" label="Caution time" value={`${result.caution_min_sim} min`} sub="Below 59.95 Hz" />
+        <ResultStat tone="bad" label="Peak severity" value={`${(result.peak_severity * 100).toFixed(0)}%`} sub="Brownout intensity" />
+        <ResultStat tone="bad" label="Customers at risk" value="~70 K" sub="Metro Boston UFLS zone (simulated)" />
       </div>
     );
   }
   return (
-    <div className="shrink-0 bg-emerald-950/50 border-b border-emerald-800/60 px-6 py-3 grid grid-cols-4 gap-6">
-      <div>
-        <div className="text-[10px] uppercase tracking-widest text-emerald-300">Outcome</div>
-        <div className="text-lg font-semibold text-emerald-200">Brownout averted</div>
-        <div className="text-[11px] text-emerald-300/80">Frequency held; priority loads untouched.</div>
-      </div>
-      <div>
-        <div className="text-[10px] uppercase tracking-widest text-emerald-300">Compute deferred</div>
-        <div className="text-lg font-mono font-semibold text-emerald-100">{result.shed_mwh} MWh</div>
-        <div className="text-[11px] text-emerald-300/80">{result.shed_mw.toFixed(0)} MW × 30 min · resumes after restart window</div>
-      </div>
-      <div>
-        <div className="text-[10px] uppercase tracking-widest text-emerald-300">Avoided customer impact</div>
-        <div className="text-lg font-mono font-semibold text-emerald-100">${(result.avoided_dollars/1000).toFixed(0)} K</div>
-        <div className="text-[11px] text-emerald-300/80">~{(result.avoided_customers/1000).toFixed(0)} K customers · {result.avoided_brownout_min} min UFLS averted</div>
-      </div>
-      <div>
-        <div className="text-[10px] uppercase tracking-widest text-emerald-300">Carbon avoided</div>
-        <div className="text-lg font-mono font-semibold text-emerald-100">~{result.avoided_co2_tons} t CO₂</div>
-        <div className="text-[11px] text-emerald-300/80">No gas peaker spin-up needed</div>
-      </div>
+    <div className="shrink-0 bg-emerald-950/25 border-b border-emerald-900/50 px-6 py-3 grid grid-cols-2 md:grid-cols-4 gap-6">
+      <ResultStat tone="good" label="Outcome" value="Brownout averted" sub="Frequency held · priority loads safe" />
+      <ResultStat tone="good" label="Compute deferred" value={`${result.shed_mwh} MWh`} sub={`${result.shed_mw.toFixed(0)} MW × 30 min`} />
+      <ResultStat tone="good" label="Avoided impact" value={`$${(result.avoided_dollars/1000).toFixed(0)} K`} sub={`~${(result.avoided_customers/1000).toFixed(0)} K customers · ${result.avoided_brownout_min} min UFLS`} />
+      <ResultStat tone="good" label="Carbon avoided" value={`~${result.avoided_co2_tons} t CO₂`} sub="No peaker spin-up" />
     </div>
   );
 }
 
-function ChartLegend() {
-  const items = [
-    { color: "#10b981", label: "Gen available", shape: "line" },
-    { color: "#a78bfa", label: "Total load", shape: "line" },
-    { color: "#60a5fa", label: "Actual demand", shape: "dashed" },
-    { color: "#94a3b8", label: "EIA forecast", shape: "dashed" },
-    { color: "#fbbf24", label: "Frequency", shape: "line" },
-  ];
+function ResultStat({ tone, label, value, sub }: { tone: "good" | "bad"; label: string; value: string; sub: string }) {
+  const labelCls = tone === "good" ? "text-emerald-400" : "text-rose-400";
+  const valueCls = tone === "good" ? "text-emerald-100" : "text-rose-100";
+  const subCls   = tone === "good" ? "text-emerald-300/70" : "text-rose-300/70";
   return (
-    <div className="flex gap-3 text-[11px] text-zinc-400">
-      {items.map((it) => (
-        <span key={it.label} className="flex items-center gap-1.5">
-          <span className={`inline-block w-3 h-0.5 ${it.shape === "dashed" ? "border-t border-dashed" : ""}`}
-            style={{ background: it.shape === "line" ? it.color : undefined, borderColor: it.shape === "dashed" ? it.color : undefined }} />
-          {it.label}
-        </span>
-      ))}
+    <div>
+      <div className={`text-[10px] uppercase tracking-[0.22em] ${labelCls}`}>{label}</div>
+      <div className={`text-lg font-semibold tabular-nums ${valueCls}`}>{value}</div>
+      <div className={`text-[11px] ${subCls}`}>{sub}</div>
+    </div>
+  );
+}
+
+function BrownoutStrip({ severity, mode }: { severity: number; mode: AppState["mode"] }) {
+  const intense = severity > 0.7;
+  return (
+    <div className={`shrink-0 px-6 py-2 text-center font-mono text-sm border-b ${
+      intense ? "bg-rose-700 text-white border-rose-600 animate-pulse" : "bg-rose-950/60 text-rose-100 border-rose-900/60"
+    }`}>
+      ⚠ BROWNOUT <span className="opacity-70">(sim.)</span> · Metro Boston · severity {(severity * 100).toFixed(0)}%
+      {mode === "baseline" && " · no coordination"}
     </div>
   );
 }
@@ -408,14 +477,14 @@ function DataSourceToggle({
   disabled: boolean;
 }) {
   const liveTitle = eiaKeyAvailable
-    ? "Pull last 4 hours of real ISO-NE demand from EIA-930 API at run start."
+    ? "Pull last 4 hours of real ISO-NE demand from EIA-930 at run start."
     : "Set EIA_API_KEY in backend/.env to enable live data.";
   return (
-    <div className={`flex rounded-md border border-zinc-800 bg-zinc-900 overflow-hidden text-[10px] uppercase tracking-widest ${disabled ? "opacity-40" : ""}`}>
+    <div className={`flex rounded-md border border-stone-800 bg-stone-950 overflow-hidden text-[10px] uppercase tracking-[0.18em] ${disabled ? "opacity-40" : ""}`}>
       <button
         onClick={() => onChange("replay")}
         disabled={disabled}
-        className={`px-3 py-1.5 ${value === "replay" ? "bg-zinc-700 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"}`}
+        className={`px-3 py-2 ${value === "replay" ? "bg-stone-800 text-stone-100" : "text-stone-500 hover:text-stone-300"}`}
         title="Replay Jun 2024 heat-dome day from bundled EIA-930 file."
       >
         Replay
@@ -423,7 +492,7 @@ function DataSourceToggle({
       <button
         onClick={() => onChange("live")}
         disabled={disabled || !eiaKeyAvailable}
-        className={`px-3 py-1.5 flex items-center gap-1.5 ${value === "live" && eiaKeyAvailable ? "bg-emerald-700/60 text-emerald-100" : "text-zinc-500 hover:text-zinc-300"} ${!eiaKeyAvailable ? "cursor-not-allowed" : ""}`}
+        className={`px-3 py-2 flex items-center gap-1.5 ${value === "live" && eiaKeyAvailable ? "bg-emerald-900/40 text-emerald-200" : "text-stone-500 hover:text-stone-300"} ${!eiaKeyAvailable ? "cursor-not-allowed" : ""}`}
         title={liveTitle}
       >
         {value === "live" && eiaKeyAvailable && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />}
@@ -436,14 +505,14 @@ function DataSourceToggle({
 function WsBadge({ status }: { status: "connecting" | "connected" | "disconnected" }) {
   if (status === "connected") {
     return (
-      <span className="text-[10px] uppercase tracking-widest px-2 py-1 rounded bg-emerald-950/40 text-emerald-400 border border-emerald-900/40 flex items-center gap-1.5">
+      <span className="text-[10px] uppercase tracking-[0.18em] px-2 py-1 rounded bg-emerald-950/40 text-emerald-400 border border-emerald-900/40 flex items-center gap-1.5">
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
         live
       </span>
     );
   }
   return (
-    <span className="text-[10px] uppercase tracking-widest px-2 py-1 rounded bg-amber-950/40 text-amber-400 border border-amber-900/40 flex items-center gap-1.5">
+    <span className="text-[10px] uppercase tracking-[0.18em] px-2 py-1 rounded bg-amber-950/40 text-amber-400 border border-amber-900/40 flex items-center gap-1.5">
       <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
       {status}
     </span>
@@ -452,36 +521,49 @@ function WsBadge({ status }: { status: "connecting" | "connected" | "disconnecte
 
 function ModeBadge({ mode, finished }: { mode: AppState["mode"]; finished: boolean }) {
   const label =
-    mode === "idle" ? "IDLE"
-      : mode === "baseline" ? (finished ? "BASELINE COMPLETE" : "BASELINE RUNNING")
-        : (finished ? "GRIDPARLEY COMPLETE" : "GRIDPARLEY RUNNING");
+    mode === "idle" ? "idle"
+      : mode === "baseline" ? (finished ? "baseline · complete" : "baseline · running")
+        : (finished ? "gridparley · complete" : "gridparley · running");
   const cls =
-    mode === "idle" ? "bg-zinc-800 text-zinc-400"
-      : mode === "baseline" ? "bg-amber-900/40 text-amber-300 border border-amber-800/50"
-        : "bg-emerald-900/40 text-emerald-300 border border-emerald-800/50";
-  return <span className={`text-xs uppercase tracking-widest px-3 py-1.5 rounded-md ${cls}`}>{label}</span>;
+    mode === "idle" ? "bg-stone-900 text-stone-400 border-stone-800"
+      : mode === "baseline" ? "bg-rose-950/40 text-rose-200 border-rose-900/50"
+        : "bg-emerald-950/40 text-emerald-200 border-emerald-900/50";
+  return (
+    <span className={`text-[10px] uppercase tracking-[0.22em] px-3 py-1.5 rounded-md border text-center ${cls}`}>
+      {label}
+    </span>
+  );
 }
 
-function Stat({ label, value, sub, valueClass = "" }: { label: string; value: string; sub?: string; valueClass?: string }) {
+function ChartLegend() {
+  const items = [
+    { color: "#fbbf24", label: "Frequency" },
+    { color: "#34d399", label: "Gen avail" },
+    { color: "#a78bfa", label: "Total load" },
+    { color: "#78716c", label: "EIA forecast", dashed: true },
+  ];
   return (
-    <div className="bg-zinc-950 px-4 py-3">
-      <div className="text-[10px] uppercase tracking-widest text-zinc-500">{label}</div>
-      <div className={`text-2xl font-mono font-semibold ${valueClass}`}>{value}</div>
-      {sub && <div className="text-[11px] text-zinc-500 mt-0.5 truncate">{sub}</div>}
+    <div className="flex gap-3 text-[11px] text-stone-400">
+      {items.map((it) => (
+        <span key={it.label} className="flex items-center gap-1.5">
+          <span className={`inline-block w-3 h-0.5 ${it.dashed ? "border-t border-dashed" : ""}`}
+            style={{ background: it.dashed ? undefined : it.color, borderColor: it.dashed ? it.color : undefined }} />
+          {it.label}
+        </span>
+      ))}
     </div>
   );
 }
 
 function TranscriptRow({ m }: { m: TranscriptMessage }) {
   const senderStyles: Record<string, { label: string; bar: string; text: string; bg: string }> = {
-    iso:       { label: "ISO-NE",   bar: "bg-blue-500",    text: "text-blue-300",    bg: "bg-blue-950/20 border-blue-900/40" },
-    dc:        { label: "DC FLEET", bar: "bg-purple-500",  text: "text-purple-300",  bg: "bg-purple-950/20 border-purple-900/40" },
-    validator: { label: "POLICY",   bar: "bg-rose-500",    text: "text-rose-300",    bg: "bg-rose-950/30 border-rose-800/60" },
-    system:    { label: "SYSTEM",   bar: "bg-zinc-500",    text: "text-zinc-400",    bg: "bg-zinc-900/40 border-zinc-800" },
+    iso:       { label: "ISO-NE",   bar: "bg-sky-500",     text: "text-sky-300",    bg: "bg-sky-950/20 border-sky-900/40" },
+    dc:        { label: "DC FLEET", bar: "bg-violet-500",  text: "text-violet-300", bg: "bg-violet-950/20 border-violet-900/40" },
+    validator: { label: "POLICY",   bar: "bg-rose-500",    text: "text-rose-300",   bg: "bg-rose-950/30 border-rose-800/60" },
+    system:    { label: "SYSTEM",   bar: "bg-stone-500",   text: "text-stone-400",  bg: "bg-stone-900/40 border-stone-800" },
   };
   const s = senderStyles[m.sender] || senderStyles.system;
   const isReject = m.kind === "tool_result" && (m.payload as { status?: string })?.status === "rejected";
-  // Provenance: real OpenRouter call vs canned-arc fallback. Visible signal that the LLM did work.
   const p = m.payload as { path?: "live" | "canned"; model?: string; latency_ms?: number; tokens?: number };
   const isLive = p?.path === "live";
   const isCanned = p?.path === "canned";
@@ -490,23 +572,23 @@ function TranscriptRow({ m }: { m: TranscriptMessage }) {
       <div className={`w-1 rounded-sm ${isReject ? "bg-rose-500" : s.bar}`} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between text-xs mb-1 gap-2">
-          <span className={`font-mono uppercase tracking-widest ${s.text} flex items-center gap-2 flex-wrap`}>
+          <span className={`font-mono uppercase tracking-[0.16em] ${s.text} flex items-center gap-2 flex-wrap`}>
             <span>{s.label}</span>
-            <span className="text-zinc-600 normal-case">{m.kind}</span>
+            <span className="text-stone-600 normal-case tracking-normal">{m.kind}</span>
             {isReject && <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[10px] font-bold animate-pulse">⚠ REJECTED</span>}
             {isLive && (
-              <span className="px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/50 text-emerald-300 text-[9px] normal-case">
+              <span className="px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/50 text-emerald-300 text-[9px] normal-case tracking-normal">
                 {p?.model?.split("/").pop() ?? "live"} · {p?.latency_ms != null ? `${p.latency_ms}ms` : "live"}
                 {p?.tokens != null ? ` · ${p.tokens}t` : ""}
               </span>
             )}
             {isCanned && (
-              <span className="px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-400 text-[9px] normal-case">canned</span>
+              <span className="px-1.5 py-0.5 rounded bg-stone-800 border border-stone-700 text-stone-400 text-[9px] normal-case tracking-normal">canned</span>
             )}
           </span>
-          <span className="text-zinc-600 shrink-0">{m.ts_local}</span>
+          <span className="text-stone-600 shrink-0 font-mono">{m.ts_local}</span>
         </div>
-        <div className={`text-sm leading-snug ${isReject ? "text-rose-100 font-medium" : "text-zinc-200"}`}>{m.text}</div>
+        <div className={`text-sm leading-snug ${isReject ? "text-rose-100 font-medium" : "text-stone-200"}`}>{m.text}</div>
       </div>
     </div>
   );
@@ -514,8 +596,8 @@ function TranscriptRow({ m }: { m: TranscriptMessage }) {
 
 function ThinkingBubble({ actor, text }: { actor: "iso" | "dc" | "validator"; text: string }) {
   const styles: Record<string, { label: string; bar: string; text: string; bg: string }> = {
-    iso:       { label: "ISO-NE",   bar: "bg-blue-500/60",   text: "text-blue-300/80",   bg: "bg-blue-950/10 border-blue-900/30 border-dashed" },
-    dc:        { label: "DC FLEET", bar: "bg-purple-500/60", text: "text-purple-300/80", bg: "bg-purple-950/10 border-purple-900/30 border-dashed" },
+    iso:       { label: "ISO-NE",   bar: "bg-sky-500/60",    text: "text-sky-300/80",    bg: "bg-sky-950/10 border-sky-900/30 border-dashed" },
+    dc:        { label: "DC FLEET", bar: "bg-violet-500/60", text: "text-violet-300/80", bg: "bg-violet-950/10 border-violet-900/30 border-dashed" },
     validator: { label: "POLICY",   bar: "bg-rose-500/60",   text: "text-rose-300/80",   bg: "bg-rose-950/10 border-rose-900/30 border-dashed" },
   };
   const s = styles[actor];
@@ -524,10 +606,10 @@ function ThinkingBubble({ actor, text }: { actor: "iso" | "dc" | "validator"; te
       <div className={`w-1 rounded-sm ${s.bar}`} />
       <div className="flex-1">
         <div className="flex items-center text-xs mb-1">
-          <span className={`font-mono uppercase tracking-widest ${s.text}`}>{s.label}</span>
+          <span className={`font-mono uppercase tracking-[0.16em] ${s.text}`}>{s.label}</span>
           <Dots />
         </div>
-        <div className="text-sm text-zinc-400 leading-snug">{text}</div>
+        <div className="text-sm text-stone-400 leading-snug">{text}</div>
       </div>
     </div>
   );
@@ -536,9 +618,9 @@ function ThinkingBubble({ actor, text }: { actor: "iso" | "dc" | "validator"; te
 function Dots() {
   return (
     <span className="ml-2 inline-flex gap-1">
-      <span className="w-1 h-1 rounded-full bg-zinc-500 animate-bounce" style={{ animationDelay: "0ms" }} />
-      <span className="w-1 h-1 rounded-full bg-zinc-500 animate-bounce" style={{ animationDelay: "150ms" }} />
-      <span className="w-1 h-1 rounded-full bg-zinc-500 animate-bounce" style={{ animationDelay: "300ms" }} />
+      <span className="w-1 h-1 rounded-full bg-stone-500 animate-bounce" style={{ animationDelay: "0ms" }} />
+      <span className="w-1 h-1 rounded-full bg-stone-500 animate-bounce" style={{ animationDelay: "150ms" }} />
+      <span className="w-1 h-1 rounded-full bg-stone-500 animate-bounce" style={{ animationDelay: "300ms" }} />
     </span>
   );
 }
