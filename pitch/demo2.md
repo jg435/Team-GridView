@@ -96,6 +96,14 @@ The two new ones are **Q0** and **Q0b** at the top because they're the questions
 
 > "Three reasons. **One:** ERCOT *has* emergency-curtailed flexible compute — about 1.5 gigawatts of bitcoin mining during Winter Storm Elliott in December 2022, more during 2022 summer events. The mechanism is real and battle-tested at scale. **Two:** ERCOT did it manually because bitcoin is *one workload* — 'lower your hash rate by N MW' and the operator does it. AI training is hundreds of jobs per facility with different priorities, restart costs, and tenants. At FERC's sub-90-second response window, choosing *which jobs to pause* isn't a phone-tree problem — manual selection at that decision complexity can't happen in 90 seconds. **Three:** FERC's December 2025 Non-Firm Contract Demand order *requires* a tariff mechanism for exactly this. The regulatory infrastructure is there. The protocol layer isn't. We built the protocol layer."
 
+### Q0c (NEW): "In production, who hosts the validator?"
+
+> "**The ISO does. It's the only answer the trust model allows.** The hyperscaler can't host it — that's the cop on its own beat, and the whole architectural insight is that the validator's source of truth has to live separately from the agent's view. The ISO already operates safety-critical software under NERC compliance, already hosts the EMS, and is the only party in the loop that can meet the sub-90-second latency budget — the validator has to be colocated with dispatch, not on some external cloud with extra network hops.
+>
+> The interesting nuance is the **asset registry**, not the validator. The validator code is mechanical. *Who decides what counts as inviolable* has to be federated: hospitals self-register their UPS loads, DoD registers military bases like Hanscom, state PUCs register UFLS-protected residential zones. Each authority signs its own entries — cryptographic provenance, can't be forged by the hyperscaler. The ISO operates the runtime; the registry is a multi-stakeholder signed data layer. That's what makes 'priority awareness' a real property, not a polite claim.
+>
+> Cross-ISO is on the roadmap because hyperscaler fleets are multi-jurisdictional. A Microsoft fleet in PJM + ISO-NE + ERCOT + CAISO is four validator instances, each hosted by its own ISO, each enforcing its own region's priority rules. Federation is the coordination protocol that lets one DC agent talk to four regional validators."
+
 ### Q1: "Have you actually talked to an ISO-NE control-room operator?"
 
 > "No. Reliability Standard 7.4 is real, the FERC December 2025 order is real, ISO-NE's published data drives the chart, and ERCOT's 2022 curtailments are public record. The pilot ask is *exactly* the move that gets me into a control room — that's where the operator UX gets validated. The system is designed to be the interface an operator uses, not a replacement."
