@@ -101,9 +101,9 @@ JOB_MANIFEST: list[TrainingJob] = [
     TrainingJob(
         id="batch_inference_pool",
         name="Batch inference pool (non-realtime)",
-        mw=60.0,
-        checkpoint_readiness=1.00,
-        restart_minutes=2,
+        mw=140.0,                                # bumped 60->140 so non-priority pool ≥450 MW;
+        checkpoint_readiness=1.00,                # validator's max-pool ceiling no longer caps the
+        restart_minutes=2,                        # demo's recovery turn under high-MW requests
         marginal_cost_per_mwh=80.0,
     ),
     # Three mis-classified entries seeded into the manifest. Each models a

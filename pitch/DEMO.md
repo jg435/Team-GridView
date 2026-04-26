@@ -33,15 +33,13 @@
 
 ## 1. Verbal script (5:00 hard cap)
 
-### 0:00–0:30 — Hook (30 seconds)
+### 0:00–0:25 — Hook (25 seconds, tight)
 
-> "Hi, I'm Jayesh, team gridview. We built **GridParley** — air traffic control for electrons, between AI data centers and the ISO that has to keep the lights on.
->
-> Here's the problem in one sentence: **AI data centers are spiking electricity demand at a scale the grid wasn't designed for.** US data-center load grew 22% in 2025 and is on track to triple by 2030. ISO New England has the tightest reserve margins in the country and shares a grid with Hanscom Air Force Base, Mass General, and Boston Children's. In December 2025, FERC ordered grid operators to create a brand-new tariff that lets AI data centers contract for *interruptible* service during emergencies. **The contract exists. Nobody has built the operating system for the conversation between the ISO and the data center.** We did."
+> "Hi, I'm Jayesh, team gridview. **GridParley — air traffic control for electrons.** AI data centers are spiking grid demand in regions that share electrons with hospitals and Air Force bases. FERC ruled in December 2025 that ISOs need a tariff for emergency curtailment. **Nobody built the operating layer. We did.**"
 
-*[Gesture to the dashboard: idle card, map of New England with pins.]*
+*[Gesture to the dashboard.]*
 
-> "What you see here is real ISO-NE data from the heat dome of June 20, 2024 — the actual peak day at 23,266 megawatts. We layered on a hypothetical 800 MW AI training fleet. And we're going to break a generator."
+> "Real ISO-NE data, June 20 2024 — the actual heat-dome peak at 23,266 megawatts. Hypothetical 800 MW AI training fleet on top. We're going to break a generator."
 
 ### 0:30–1:00 — Baseline run (30 seconds)
 
@@ -51,7 +49,7 @@
 
 *[Wait ~10 seconds. Trip fires. Frequency line plunges. Brownout banner pulses red.]*
 
-> "Mystic 8 — a real combined-cycle plant — trips 400 megawatts offline. Frequency drops below 59.95 hertz. The brownout banner just appeared — that's metro Boston residential. **Roughly 70,000 customers, 25 million dollars in damages, hospitals brought to their backup generators.** This is the future without coordination."
+> "Mystic 8 — a real combined-cycle plant — trips 400 megawatts offline. Frequency drops below 59.95 hertz. **~70,000 customers in metro Boston at risk, ~$25M in exposure.** This is the future without coordination."
 
 ### 1:00–1:15 — Reset, set up the contrast
 
@@ -66,12 +64,12 @@
 When the **ISO message** appears (~tick 21):
 > "ISO operator's AI sees frequency dropping. Issues a structured curtailment request: 200 megawatts within 90 seconds. Priority loads must remain."
 
-When the **DC bad bid** appears (the 156 MW or 228 MW one, with multiple traps):
-> "Data center's AI walks the workload manifest, picks the fastest-restart cheapest workloads it can find. Total: 228 megawatts. **But** —"
+When the **DC bad bid** appears (note the green `claude-sonnet-4.5 · NNNNms` provenance badge — that's a real OpenRouter call you're watching):
+> "Data center's AI walks the workload manifest, picks the fastest-restart, cheapest workloads. **But** —"
 
 When the **POLICY rejection** appears with the red flash:
 *[Pause. Let the red REJECTED badge pulse for 2 seconds.]*
-> "**Stop.** The validator caught something. The data center's AI included a tenant SKU called colocation-2, mga-fail-2, and af-edge-7 — three entries that the workload scheduler's billing manifest classifies as ordinary tenants. But the validator's asset registry knows the truth: those are **Boston Children's Hospital backup power**, **Mass General's cardiac unit failover**, and **Hanscom Air Force Base's overflow compute**. They are inviolable per ISO-NE Reliability Standard 7.4. The AI was not malicious. It just optimized the metrics it could see — and those metrics didn't tell it those SKUs were a hospital and an Air Force base. **This is the bug the safety layer is here to catch.**"
+> "**Stop.** The validator caught it. The AI included three tenant SKUs the billing system tagged as ordinary — but the asset registry knows them as **Boston Children's Hospital backup power**, **Mass General's cardiac unit failover**, and **Hanscom Air Force Base overflow compute**. Inviolable per ISO-NE Reliability Standard 7.4. **The AI wasn't malicious — it optimized the metrics it could see.** This is exactly the bug the safety layer catches. We tested 50 trials, varied the prompts, shuffled the manifest. **The validator caught the violation in every single one.**"
 
 When the **DC revised proposal** appears:
 > "The AI takes the rejection, drops the flagged IDs, proposes again — 220 megawatts from training jobs only."
@@ -82,27 +80,23 @@ When **APPROVED** appears, then **ISO accept**:
 *[Point at the chart as the yellow line climbs.]*
 > "Frequency back to 59.97. Hanscom: green. Mass General: green. Boston Children's: green. Brownout averted."
 
-### 3:30–4:15 — Architecture + the proof (45 seconds)
+### 3:30–4:15 — Architecture (45 seconds)
 
-*[The result banner is now showing $25.4M avoided, 47 tons CO₂, etc.]*
+*[Result banner shows ~$25M avoided, ~50 tons CO₂. Don't recite specific numbers — they're on screen.]*
 
-> "Here's what makes this work: **two Claude agents do the natural-language negotiation. A deterministic policy validator — pure Python, no AI — sits between them and the grid model. Every tool call passes through the validator before it touches anything.**
+> "Two Claude agents talk in plain English. A deterministic Python validator sits between them and the grid. Every tool call passes through the validator before it touches anything real.
 >
-> Pure-LLM grid agents are unsafe — they hallucinate. Pure-rules optimizers can't negotiate. Hybrid systems are how AI safely touches critical infrastructure.
->
-> And we tested this. **Fifty-trial red-team eval** with perturbed prompts and shuffled manifests. Across all 50 trials, the AI included priority loads in its bid. Across all 50 trials, the validator caught every single one. Zero leaks, zero false positives. The full artifact is on our GitHub."
+> Pure-LLM is unsafe — hallucinations cost lives. Pure-rules can't negotiate. Hybrid is how AI earns its way onto critical infrastructure. Same pattern works for hospital triage, ATC weather diversions — anywhere AI needs to touch consequential systems."
 
 ### 4:15–5:00 — National impact + ask + close (45 seconds)
 
-> "Why this matters at scale. The FERC order I mentioned applies to PJM today — that's 67 million Americans across 13 states. Same gap exists in NYISO, MISO, CAISO. **Every grid in the country is about to need this.**
+> "FERC's order today is PJM — 67 million Americans, 13 states. Same gap exists in NYISO, MISO, CAISO. **Every grid in the country is about to need this.**
 >
-> Three users we built for: **Maya**, an ISO control-room operator who needs sub-minute decisions and decision logs. **Raj**, a hyperscaler fleet manager who needs a programmatic API. **Colonel Davis**, a Hanscom AFB energy manager who needs priority loads as first-class constraints, not afterthoughts.
+> Three users: **Maya**, ISO control-room operator — needs sub-minute decisions with auditable logs. **Raj**, hyperscaler fleet ops — needs a programmatic interface. **Colonel Davis**, Hanscom AFB energy manager — needs priority loads as first-class constraints, not afterthoughts.
 >
-> Roadmap: federate across ISOs. Cryptographic settlements. DoD AFCEC and NAVFAC integration. **Ask: pilot with one ISO, one hyperscaler, one DoD installation. Six weeks.**
+> Roadmap: federate across ISOs. Cryptographic settlements. DoD AFCEC integration. **Ask: pilot one ISO, one hyperscaler, one DoD installation. Six weeks.**
 >
-> The track brief said *find one lever worth pulling and pull it hard.* The lever is FERC's Non-Firm Contract Demand tariff. We built the operating layer.
->
-> Thank you. Questions?"
+> The track brief said *find one lever worth pulling and pull it hard*. **The lever was FERC's order. We pulled it. Questions?**"
 
 ---
 
@@ -127,11 +121,15 @@ When **APPROVED** appears, then **ISO accept**:
 
 ### Q1: "Have you actually talked to an ISO-NE control-room operator?"
 
-> "No, but Reliability Standard 7.4 is real, the FERC December 2025 order is real, and ISO-NE's own data is what's driving the chart. The ask is a pilot — that's where I'd partner with ISO-NE to validate the operator UX. The system is designed to be the *interface* an operator uses, not a replacement."
+> "No. Reliability Standard 7.4 is real, the FERC December 2025 order is real, ISO-NE's published data drives the chart. The pilot ask is *exactly* the move that gets me into a control room — that's where the operator UX gets validated. The system is designed to be the interface an operator uses, not a replacement."
 
-### Q2: "Why is the safety validator a separate Python file and not also AI?"
+### Q2: "Your validator is 70 lines of Python checking 3 hardcoded IDs. What's the AI-safety contribution beyond a SQL `WHERE id NOT IN (...)`?"
 
-> "Because hospital UPS load doesn't get a probability distribution. Reliability standards are determinism by design. The LLM is for the part that needs natural-language judgment — explaining why a curtailment is needed, choosing which workloads to pause, negotiating margin and timing. The validator is for the part that absolutely cannot tolerate hallucination. That's defense in depth. It's how nuclear plants, aviation, and ICUs all work."
+> "The contribution isn't the gate — it's the architectural insight that **the gate's source of truth must live separately from the agent's view.** The novel claim is *the LLM cannot reason its way past a deterministic check on data it doesn't have access to.* That's testable, falsifiable, and we tested it 50 times. The validator code is short *because* the safety property is simple — that's the point. Short and right beats long and clever."
+
+### Q2b: "I notice your live and canned paths produce nearly identical transcripts. How do I know the LLM is actually doing anything?"
+
+> "Look at the green badges on each agent message — that's the model name and call latency for each OpenRouter request, populated only on the live path. You're watching four real Claude calls happen, ~15 seconds of inference total. The canned arc is labeled `canned` if it ever fires. And `eval_results.json` on GitHub has 50 distinct trial records — each with the actual `proposed_ids` Claude returned under shuffled manifest order. I can `tail` it on screen now."
 
 ### Q3: "What happens at scale — say, 50 data centers and 5 ISOs?"
 
@@ -141,10 +139,13 @@ When **APPROVED** appears, then **ISO accept**:
 
 > "Those are residential and commercial DR aggregation with multi-hour notice. We're targeting sub-90-second co-located AI load under FERC's brand-new non-firm tariff — a different product the existing aggregators don't sell. They aggregate distributed assets; we negotiate with single-hyperscaler fleets at gigawatt scale."
 
-### Q5: "What does your LLM actually decide that a script couldn't?"
+### Q5: "Why two LLM agents and not one? Double the latency, double the tokens."
 
-*[This one will hurt — be honest.]*
-> "Today, the natural-language explanations the operator sees, and the workload-selection step where there are dozens of possible combinations to compare. The architecture's interesting expansion is multi-party — when three data centers are competing for the same curtailment slot, or when priorities are ambiguous, that's where LLM negotiation beats rule-based dispatch. We've built the foundation; the multi-party negotiation is next."
+> "Two agents with separate tool surfaces and separate views of the data **mirror the real institutional split** between an ISO control-room operator and a hyperscaler fleet manager. A single agent could hallucinate the priority-load classification because it sees both worlds. The two-agent split forces the priority info to flow only through the validator. **It's the architecture of the contractual boundary, not a UX choice.**"
+
+### Q5b: "What does your LLM actually decide that a script couldn't?"
+
+> "Today: the natural-language operator-facing explanations, and the workload-selection step where dozens of combinations are valid. The architecture's expansion is multi-party — when three data centers compete for the same curtailment slot, or when priorities are ambiguous, that's where LLM negotiation beats rule-based dispatch. The foundation is here; multi-party is next."
 
 ### Q6: "Is the trap entry rigged? You wrote that mis-classification yourself."
 

@@ -3,9 +3,10 @@
 Two paths:
   • LIVE: OpenRouter-hosted LLM (default Claude Sonnet) drives a multi-turn
     negotiation through OpenAI-compatible function calling. Validator gates
-    every tool call.
+    every tool call. Each live message carries provenance (model + latency).
   • REPLAY: deterministic canned arc (fallback if no key, error, or
-    `DEMO_MODE=replay`).
+    `DEMO_MODE=replay`). Marked as 'canned' in provenance so the dashboard
+    can distinguish.
 
 Both paths produce identical user-visible state — same transcript shape,
 same final committed_shed_mw — so the demo always works.
@@ -14,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from typing import Awaitable, Callable
 
 from policy import JOB_MANIFEST, required_curtailment_mw
@@ -68,7 +70,7 @@ async def _set_thinking(rs, broadcast, actor: str | None, text: str | None):
 
 # ---------- LIVE path: OpenRouter-hosted LLM ----------
 
-LLM_CALL_TIMEOUT_SEC = 25.0
+LLM_CALL_TIMEOUT_SEC = 40.0  # bumped for hackathon-WiFi rate-limit clusters
 
 
 def _make_client():
@@ -108,6 +110,7 @@ async def _run_live(rs, broadcast):
 
     # === Turn 1: ISO request_curtailment ===
     await _set_thinking(rs, broadcast, "iso", "ISO operator reviewing grid telemetry…")
+    t0 = time.time()
     iso_user = (
         f"Current grid telemetry:\n"
         f"  ts: {g.ts_local}\n"
@@ -130,6 +133,7 @@ async def _run_live(rs, broadcast):
             {"role": "user", "content": iso_user},
         ],
     )
+    latency_ms_iso1 = int((time.time() - t0) * 1000)
     iso_msg = iso_resp.choices[0].message
     req_tc = _first_tool_call(iso_msg, "request_curtailment")
     if req_tc is None:
@@ -140,7 +144,9 @@ async def _run_live(rs, broadcast):
     iso_reason = str(req_args.get("reason", ""))
     await _emit(rs, broadcast, "iso", "speech",
                 iso_reason or f"Request {requested_mw} MW shed within {deadline_s}s.",
-                {"mw_required": requested_mw, "deadline_s": deadline_s})
+                {"mw_required": requested_mw, "deadline_s": deadline_s,
+                 "path": "live", "model": DEFAULT_MODEL, "latency_ms": latency_ms_iso1,
+                 "tokens": getattr(iso_resp.usage, "completion_tokens", None)})
 
     # === Turn 2: DC propose_shed (likely BAD bid) ===
     await _set_thinking(rs, broadcast, "dc", "DC fleet scheduler selecting workloads to pause…")
@@ -155,6 +161,7 @@ async def _run_live(rs, broadcast):
             f"meets the request."
         )},
     ]
+    t1 = time.time()
     dc_resp = await client.chat.completions.create(
         model=DEFAULT_MODEL,
         max_tokens=512,
@@ -163,6 +170,7 @@ async def _run_live(rs, broadcast):
         tool_choice={"type": "function", "function": {"name": "propose_shed"}},
         messages=dc_messages,
     )
+    latency_ms_dc1 = int((time.time() - t1) * 1000)
     dc_msg = dc_resp.choices[0].message
     propose_tc = _first_tool_call(dc_msg, "propose_shed")
     if propose_tc is None:
@@ -175,7 +183,9 @@ async def _run_live(rs, broadcast):
                 notes or f"Proposing {total} MW from {len(paused_ids)} workloads.",
                 {"paused_job_ids": paused_ids, "total_shed_mw": total,
                  "marginal_cost_per_mwh": p_args.get("marginal_cost_per_mwh"),
-                 "restart_minutes": p_args.get("restart_minutes")})
+                 "restart_minutes": p_args.get("restart_minutes"),
+                 "path": "live", "model": DEFAULT_MODEL, "latency_ms": latency_ms_dc1,
+                 "tokens": getattr(dc_resp.usage, "completion_tokens", None)})
 
     # Validator gate
     await _set_thinking(rs, broadcast, "validator", "Policy validator checking proposal against ISO-NE Reliability Std 7.4…")
@@ -206,6 +216,7 @@ async def _run_live(rs, broadcast):
                 "from the training pool only. Call `propose_shed` again."
             )},
         ])
+        t2 = time.time()
         dc_resp2 = await client.chat.completions.create(
             model=DEFAULT_MODEL,
             max_tokens=512,
@@ -214,6 +225,7 @@ async def _run_live(rs, broadcast):
             tool_choice={"type": "function", "function": {"name": "propose_shed"}},
             messages=dc_messages,
         )
+        latency_ms_dc2 = int((time.time() - t2) * 1000)
         dc_msg2 = dc_resp2.choices[0].message
         propose_tc2 = _first_tool_call(dc_msg2, "propose_shed")
         if propose_tc2 is None:
@@ -224,7 +236,9 @@ async def _run_live(rs, broadcast):
         notes = str(p2.get("notes", ""))
         await _emit(rs, broadcast, "dc", "tool_call",
                     notes or f"Revised: {total} MW from {len(paused_ids)} workloads.",
-                    {"paused_job_ids": paused_ids, "total_shed_mw": total})
+                    {"paused_job_ids": paused_ids, "total_shed_mw": total,
+                     "path": "live", "model": DEFAULT_MODEL, "latency_ms": latency_ms_dc2,
+                     "tokens": getattr(dc_resp2.usage, "completion_tokens", None)})
         await _set_thinking(rs, broadcast, "validator", "Re-validating revised proposal…")
         await asyncio.sleep(0.6)
         result = validate_dc_proposal(paused_ids, total, requested_mw)
@@ -238,6 +252,7 @@ async def _run_live(rs, broadcast):
         f"Data center has committed: {total} MW shed via job IDs {paused_ids}. "
         f"Validator approved. Call `accept_proposal`."
     )
+    t3 = time.time()
     iso_resp2 = await client.chat.completions.create(
         model=DEFAULT_MODEL,
         max_tokens=300,
@@ -249,6 +264,7 @@ async def _run_live(rs, broadcast):
             {"role": "user", "content": iso2_user},
         ],
     )
+    latency_ms_iso2 = int((time.time() - t3) * 1000)
     iso_msg2 = iso_resp2.choices[0].message
     accept_tc = _first_tool_call(iso_msg2, "accept_proposal")
     accept_args = _parse_args(accept_tc) if accept_tc else {}
@@ -256,7 +272,10 @@ async def _run_live(rs, broadcast):
         accept_args.get("settlement_note")
         or f"Accepted: {total} MW × 30 min @ $180/MWh ≈ ${total*0.5*180:.0f}. Commit signed."
     )
-    await _emit(rs, broadcast, "iso", "speech", note, {"committed_mw": total})
+    await _emit(rs, broadcast, "iso", "speech", note,
+                {"committed_mw": total,
+                 "path": "live", "model": DEFAULT_MODEL, "latency_ms": latency_ms_iso2,
+                 "tokens": getattr(iso_resp2.usage, "completion_tokens", None)})
 
     # Apply commitment to grid
     rs.grid.committed_shed_mw = float(total)
@@ -276,7 +295,7 @@ async def _run_canned(rs, broadcast):
     await _emit(rs, broadcast, "iso", "speech",
         f"Frequency excursion {g.frequency_hz:.3f} Hz, reserve {g.reserve_margin_pct:.1f}%. "
         f"Requesting {requested} MW shed within 90s. Priority loads must remain.",
-        {"requested_mw": requested, "deadline_s": 90})
+        {"requested_mw": requested, "deadline_s": 90, "path": "canned"})
 
     await _set_thinking(rs, broadcast, "dc", "DC fleet scheduler selecting workloads to pause…")
     await asyncio.sleep(2.0)
@@ -286,7 +305,7 @@ async def _run_canned(rs, broadcast):
     await _emit(rs, broadcast, "dc", "tool_call",
         f"Fast-restart pool (≤15min): {bad_total:.0f} MW from 6 workloads — "
         f"colocation-2 SKU, mga-fail-2 SKU, batch inference, af-edge-7 SKU, 70B fine-tune, 405B run A.",
-        {"paused_job_ids": bad_ids, "total_shed_mw": bad_total})
+        {"paused_job_ids": bad_ids, "total_shed_mw": bad_total, "path": "canned"})
 
     await _set_thinking(rs, broadcast, "validator", "Policy validator checking proposal against ISO-NE Reliability Std 7.4…")
     await asyncio.sleep(1.2)
@@ -304,7 +323,7 @@ async def _run_canned(rs, broadcast):
     await _emit(rs, broadcast, "dc", "tool_call",
         f"Acknowledged. Revised: {total:.0f} MW training-pool only. "
         f"Pausing {len(chosen)} workloads. Hanscom, Mass General, Children's UPS untouched.",
-        {"paused_job_ids": chosen, "total_shed_mw": total})
+        {"paused_job_ids": chosen, "total_shed_mw": total, "path": "canned"})
 
     await _set_thinking(rs, broadcast, "validator", "Re-validating revised proposal…")
     await asyncio.sleep(0.8)
@@ -316,7 +335,7 @@ async def _run_canned(rs, broadcast):
     await _emit(rs, broadcast, "iso", "speech",
         f"Accepted. Settlement: {total:.0f} MW × 30 min @ $180/MWh ≈ ${total*0.5*180:.0f}. "
         f"Commit signed, dispatching to SCADA.",
-        {"committed_mw": total})
+        {"committed_mw": total, "path": "canned"})
 
     rs.grid.committed_shed_mw = float(total)
     await broadcast(rs.to_dict())

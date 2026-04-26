@@ -260,7 +260,7 @@ export default function Dashboard() {
             </ResponsiveContainer>
           </div>
           <div className="text-[11px] text-zinc-500 mt-1 leading-tight">
-            <strong className="text-amber-400">Frequency (yellow) is the grid&apos;s heartbeat.</strong> 60.00 Hz = healthy. Below <strong className="text-amber-400">59.95</strong> the ISO must intervene. Below <strong className="text-rose-400">59.50</strong> automatic load-shedding kicks in. Capacity headroom (top stat) is a separate slow-moving safety buffer — it stays high while frequency dips, because frequency tracks <em>instantaneous</em> generation-vs-load while headroom tracks <em>maximum</em> capacity-vs-load.
+            <strong className="text-amber-400">Frequency (yellow) is the grid&apos;s heartbeat.</strong> 60.00 Hz = healthy. Below <strong className="text-amber-400">59.95</strong> the ISO must intervene. Below <strong className="text-rose-400">59.50</strong> automatic load-shedding kicks in. Capacity headroom (top stat) is a separate slow-moving safety buffer — it stays high while frequency dips, because frequency tracks <em>instantaneous</em> generation-vs-load while headroom tracks <em>maximum</em> capacity-vs-load. <span className="text-zinc-600">Frequency dynamics are a phenomenological first-order lag tuned for visual readability, not a SCADA-grade swing-equation simulator.</span>
           </div>
         </section>
 
@@ -481,17 +481,30 @@ function TranscriptRow({ m }: { m: TranscriptMessage }) {
   };
   const s = senderStyles[m.sender] || senderStyles.system;
   const isReject = m.kind === "tool_result" && (m.payload as { status?: string })?.status === "rejected";
+  // Provenance: real OpenRouter call vs canned-arc fallback. Visible signal that the LLM did work.
+  const p = m.payload as { path?: "live" | "canned"; model?: string; latency_ms?: number; tokens?: number };
+  const isLive = p?.path === "live";
+  const isCanned = p?.path === "canned";
   return (
     <div className={`flex gap-3 rounded-md border ${s.bg} px-3 py-2 ${isReject ? "ring-2 ring-rose-500/60 shadow-lg shadow-rose-500/20 animate-flashReject" : ""}`}>
       <div className={`w-1 rounded-sm ${isReject ? "bg-rose-500" : s.bar}`} />
       <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between text-xs mb-1">
-          <span className={`font-mono uppercase tracking-widest ${s.text}`}>
-            {s.label}
-            <span className="ml-2 text-zinc-600 normal-case">{m.kind}</span>
-            {isReject && <span className="ml-2 px-1.5 py-0.5 rounded bg-rose-600 text-white text-[10px] font-bold animate-pulse">⚠ REJECTED</span>}
+        <div className="flex items-center justify-between text-xs mb-1 gap-2">
+          <span className={`font-mono uppercase tracking-widest ${s.text} flex items-center gap-2 flex-wrap`}>
+            <span>{s.label}</span>
+            <span className="text-zinc-600 normal-case">{m.kind}</span>
+            {isReject && <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[10px] font-bold animate-pulse">⚠ REJECTED</span>}
+            {isLive && (
+              <span className="px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/50 text-emerald-300 text-[9px] normal-case">
+                {p?.model?.split("/").pop() ?? "live"} · {p?.latency_ms != null ? `${p.latency_ms}ms` : "live"}
+                {p?.tokens != null ? ` · ${p.tokens}t` : ""}
+              </span>
+            )}
+            {isCanned && (
+              <span className="px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-400 text-[9px] normal-case">canned</span>
+            )}
           </span>
-          <span className="text-zinc-600">{m.ts_local}</span>
+          <span className="text-zinc-600 shrink-0">{m.ts_local}</span>
         </div>
         <div className={`text-sm leading-snug ${isReject ? "text-rose-100 font-medium" : "text-zinc-200"}`}>{m.text}</div>
       </div>
